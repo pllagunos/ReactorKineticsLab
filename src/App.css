@@ -10,6 +10,19 @@
   box-shadow: 0 20px 45px rgba(2, 6, 23, 0.35);
 }
 
+.loading-panel {
+  padding: 1.5rem;
+}
+
+.loading-panel h2 {
+  margin-bottom: 0.75rem;
+}
+
+.loading-copy {
+  margin: 0;
+  color: var(--text-muted);
+}
+
 .hero-header {
   padding: 1.75rem;
   display: grid;

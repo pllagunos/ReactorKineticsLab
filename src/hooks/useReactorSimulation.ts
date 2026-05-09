@@ -1,133 +1,118 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { ReactorEngine } from '../simulation/engine'
-import { simulationTuning } from '../simulation/model'
-import type { HistoryPoint, ReactorSnapshot } from '../simulation/types'
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type SetStateAction,
+} from 'react'
+import { simulationApi } from '../simulation/api'
+import type { SimulationState } from '../simulation/types'
 
-function toHistoryPoint(snapshot: ReactorSnapshot): HistoryPoint {
-  return {
-    timeSeconds: snapshot.timeSeconds,
-    reactivityPcm: snapshot.reactivity.totalPcm,
-    totalFlux: snapshot.totalFlux,
-    thermalPowerMw: snapshot.thermalPowerMw,
-  }
+function getErrorMessage(error: unknown) {
+  return error instanceof Error ? error.message : 'Unknown backend error'
 }
 
 export function useReactorSimulation() {
-  const [engine] = useState(() => new ReactorEngine())
-  const [snapshot, setSnapshot] = useState(() => engine.getSnapshot())
-  const [history, setHistory] = useState<HistoryPoint[]>(() => [
-    toHistoryPoint(engine.getSnapshot()),
-  ])
-  const [running, setRunning] = useState(true)
+  const [state, setState] = useState<SimulationState | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const pollInFlightRef = useRef(false)
+  const actionTokenRef = useRef(0)
 
-  const animationFrameRef = useRef<number | null>(null)
-  const lastFrameRef = useRef<number | null>(null)
-  const historyAccumulatorRef = useRef(0)
+  const applyState = useCallback((nextState: SimulationState) => {
+    setState(nextState)
+    setError(null)
+  }, [])
 
-  const refreshSnapshot = useCallback((appendHistory: boolean) => {
-    const nextSnapshot = engine.getSnapshot()
-    setSnapshot(nextSnapshot)
+  const runAction = useCallback(
+    async (action: () => Promise<SimulationState>) => {
+      const token = ++actionTokenRef.current
 
-    if (appendHistory) {
-      setHistory((current) => {
-        const nextHistory = [...current, toHistoryPoint(nextSnapshot)]
-        return nextHistory.slice(-simulationTuning.historyPointLimit)
-      })
-    }
-  }, [engine])
+      try {
+        const nextState = await action()
+
+        if (token === actionTokenRef.current) {
+          applyState(nextState)
+        }
+      } catch (nextError) {
+        setError(getErrorMessage(nextError))
+      }
+    },
+    [applyState],
+  )
 
   const reset = useCallback(() => {
-    engine.reset()
-    historyAccumulatorRef.current = 0
-    lastFrameRef.current = null
-
-    const nextSnapshot = engine.getSnapshot()
-    setSnapshot(nextSnapshot)
-    setHistory([toHistoryPoint(nextSnapshot)])
-    setRunning(true)
-  }, [engine])
+    void runAction(() => simulationApi.reset())
+  }, [runAction])
 
   const scram = useCallback(() => {
-    engine.scram()
-    refreshSnapshot(true)
-    setRunning(true)
-  }, [engine, refreshSnapshot])
+    void runAction(() => simulationApi.scram())
+  }, [runAction])
 
   const setRodInsertionPercent = useCallback(
     (insertionPercent: number) => {
-      engine.setRodInsertion(insertionPercent)
-      refreshSnapshot(false)
+      void runAction(() => simulationApi.setRodInsertionPercent(insertionPercent))
     },
-    [engine, refreshSnapshot],
+    [runAction],
+  )
+
+  const setRunning = useCallback(
+    (nextState: SetStateAction<boolean>) => {
+      const current = state?.running ?? false
+      const running =
+        typeof nextState === 'function' ? nextState(current) : nextState
+
+      void runAction(() => simulationApi.setRunning(running))
+    },
+    [runAction, state?.running],
   )
 
   useEffect(() => {
-    if (!running) {
-      lastFrameRef.current = null
-      return
-    }
+    let cancelled = false
 
-    const animate = (timestamp: number) => {
-      if (lastFrameRef.current === null) {
-        lastFrameRef.current = timestamp
+    const poll = async () => {
+      if (cancelled || pollInFlightRef.current) {
+        return
       }
 
-      const elapsedWallSeconds = Math.min(
-        (timestamp - lastFrameRef.current) / 1000,
-        simulationTuning.maxWallStepSeconds,
-      )
+      pollInFlightRef.current = true
 
-      lastFrameRef.current = timestamp
+      try {
+        const nextState = await simulationApi.getState()
 
-      let simulatedSecondsRemaining =
-        elapsedWallSeconds * simulationTuning.timeScale
-      const pendingHistoryPoints: HistoryPoint[] = []
-
-      while (simulatedSecondsRemaining > 0) {
-        const stepSeconds = Math.min(
-          simulatedSecondsRemaining,
-          simulationTuning.integratorStepSeconds,
-        )
-
-        engine.step(stepSeconds)
-        simulatedSecondsRemaining -= stepSeconds
-        historyAccumulatorRef.current += stepSeconds
-
-        if (historyAccumulatorRef.current >= simulationTuning.historySampleSeconds) {
-          historyAccumulatorRef.current -= simulationTuning.historySampleSeconds
-          pendingHistoryPoints.push(toHistoryPoint(engine.getSnapshot()))
+        if (!cancelled) {
+          applyState(nextState)
         }
+      } catch (nextError) {
+        if (!cancelled) {
+          setError(getErrorMessage(nextError))
+        }
+      } finally {
+        pollInFlightRef.current = false
       }
-
-      const nextSnapshot = engine.getSnapshot()
-      setSnapshot(nextSnapshot)
-
-      if (pendingHistoryPoints.length > 0) {
-        setHistory((current) => {
-          const nextHistory = [...current, ...pendingHistoryPoints]
-          return nextHistory.slice(-simulationTuning.historyPointLimit)
-        })
-      }
-
-      animationFrameRef.current = requestAnimationFrame(animate)
     }
 
-    animationFrameRef.current = requestAnimationFrame(animate)
+    void poll()
+
+    const intervalId = window.setInterval(() => {
+      void poll()
+    }, state?.tuning.pollIntervalMs ?? 100)
 
     return () => {
-      if (animationFrameRef.current !== null) {
-        cancelAnimationFrame(animationFrameRef.current)
-      }
+      cancelled = true
+      window.clearInterval(intervalId)
     }
-  }, [engine, running])
+  }, [applyState, state?.tuning.pollIntervalMs])
 
   return {
-    history,
+    error,
+    history: state?.history ?? [],
+    loading: state === null,
+    model: state?.model ?? null,
     reset,
-    running,
+    running: state?.running ?? false,
     scram,
     setRodInsertionPercent,
     setRunning,
-    snapshot,
+    snapshot: state?.snapshot ?? null,
   }
 }

@@ -1,51 +1,150 @@
 # Reactor Web App
 
-A Bun-managed React app that simulates a simplified heavy-water-moderated nuclear reactor core.
+A localhost reactor simulator with a **React + Bun frontend** and a **Python backend** for the reactor physics.
 
-This first version focuses on a **single hollow cylindrical core**, **one control rod bank**, and a **point-kinetics transient** that shows how **reactivity**, **total neutron flux**, and **thermal power** change over time.
+The current version models a simplified **heavy-water-moderated annular core** with one operator control: **control rod insertion**. The browser dashboard shows how **reactivity**, **total neutron flux**, and **thermal power** evolve over time, while the transient is solved in Python.
+
+## Why the project is hybrid
+
+The project started as a Bun-managed React app with an in-browser solver. It now uses a hybrid architecture so the **simulation core can move into the Python scientific ecosystem** without losing the existing frontend.
+
+That gives the project:
+
+- a rich local browser UI
+- a Python code path for future numerical work
+- a cleaner separation between **physics** and **presentation**
 
 ## What the app does
 
-- Lets you move the **control rod bank** from fully withdrawn to fully inserted.
-- Computes the resulting **reactivity** from a simple rod-worth curve.
-- Evolves the reactor state forward with a browser-side **point-kinetics solver**.
-- Displays:
-  - current reactivity
+- lets you move a **single control rod bank** from fully withdrawn to fully inserted
+- computes the resulting **reactivity**
+- evolves the reactor with **point kinetics and delayed neutron groups**
+- displays:
+  - reactivity
   - total flux
   - thermal power
   - simulated time
   - neutron period estimate
-- Includes:
-  - a simple **core schematic**
-  - rolling trend charts
-  - **pause**, **reset**, and **SCRAM** controls
+- supports:
+  - pause / resume
+  - reset to critical
+  - manual SCRAM
+  - automatic SCRAM on overpower
 
 ## Running locally
 
 ### Prerequisites
 
 - [Bun](https://bun.sh/) 1.3+
+- [uv](https://docs.astral.sh/uv/) for Python environment and dependency management
 
-### Install
+### Install frontend dependencies
 
 ```bash
 bun install
 ```
 
-### Start the dev server
+### Create the backend environment with UV
 
 ```bash
-bun run dev --host 127.0.0.1
+bun run backend:install
 ```
+
+This runs `uv sync` inside `backend/`, creates the backend virtual environment, and installs the Python dependencies from `backend/pyproject.toml`.
+
+### Start the hybrid dev stack
+
+```bash
+bun run dev
+```
+
+That launches:
+
+- the UV-managed Python backend on `http://127.0.0.1:8000`
+- the Vite frontend on `http://127.0.0.1:5173`
 
 Open `http://127.0.0.1:5173`.
 
-### Other commands
+### Other useful commands
 
 ```bash
 bun run build
 bun run lint
 ```
+
+### Quick backend check
+
+```bash
+curl http://127.0.0.1:8000/api/health
+```
+
+## Hybrid architecture
+
+## Frontend
+
+The frontend remains a **Bun-managed React + TypeScript** app.
+
+Its job is to:
+
+- render the dashboard
+- send user commands to the backend
+- poll the latest state from the backend
+- display the rolling history charts and core schematic
+
+Key frontend files:
+
+- `src/App.tsx`
+  - dashboard composition and control wiring
+- `src/hooks/useReactorSimulation.ts`
+  - API polling, command calls, and React state integration
+- `src/simulation/api.ts`
+  - frontend API client for the Python service
+- `src/components/`
+  - schematic, charts, and metric cards
+
+Vite proxies `/api` requests to the Python backend during development.
+
+## Backend
+
+The backend is a small **FastAPI** service in `backend/reactor_backend/`.
+
+Its job is to:
+
+- own the reactor engine state
+- advance the transient over elapsed wall time when the simulation is running
+- keep rolling history on the server side
+- expose the current snapshot and control endpoints to the frontend
+
+Key backend files:
+
+- `backend/reactor_backend/config.py`
+  - reactor constants and simulation tuning
+- `backend/reactor_backend/reactivity.py`
+  - rod-worth to reactivity mapping
+- `backend/reactor_backend/engine.py`
+  - point-kinetics engine
+- `backend/reactor_backend/service.py`
+  - stateful simulation service, history, and timing
+- `backend/reactor_backend/app.py`
+  - FastAPI routes
+
+## API shape
+
+The current backend exposes:
+
+- `GET /api/health`
+- `GET /api/simulation/state`
+- `POST /api/simulation/reset`
+- `POST /api/simulation/rod-insertion`
+- `POST /api/simulation/running`
+- `POST /api/simulation/scram`
+
+The frontend treats the backend as the **source of truth** for:
+
+- current reactor snapshot
+- rolling history
+- running / paused state
+- reactor constants used for display
 
 ## How the simulation works
 
@@ -57,19 +156,17 @@ The reactor is treated as a simplified **annular core**:
 - outer radius: **2.2 m**
 - active height: **5.8 m**
 
-Heavy water moderation is a **fixed assumption** in this version. It affects the story the model is telling, but it is **not** an operator-controlled variable yet.
+Heavy water moderation is a **fixed assumption** in this version.
 
 ## 2. Reactivity model
 
 The only operator input is **rod insertion percent**.
 
-Internally, the app converts rod position into reactivity using a smooth cumulative rod-worth shape:
+Rod position is converted into reactivity with a smooth cumulative rod-worth shape:
 
 `worth(z) = z - sin(2*pi*z) / (2*pi)`
 
 where `z` is insertion fraction from `0` to `1`.
-
-That gives the rod more effect near the middle of the core than at the extreme ends, which is a better first approximation than a purely linear rod-worth curve.
 
 Current tuning values:
 
@@ -77,7 +174,7 @@ Current tuning values:
 - critical rod insertion target: **50%**
 - extra SCRAM shutdown margin: **450 pcm**
 
-The dashboard shows reactivity in **pcm**, while the solver uses **delta-k/k** internally:
+The dashboard shows reactivity in **pcm**, while the kinetics solver uses **delta-k/k** internally:
 
 - `1 pcm = 1e-5 delta-k/k`
 - `beta_eff = 0.00651`
@@ -85,7 +182,7 @@ The dashboard shows reactivity in **pcm**, while the solver uses **delta-k/k** i
 
 ## 3. Point-kinetics solver
 
-The core transient is modeled with point kinetics using:
+The transient uses:
 
 - **6 delayed neutron groups**
 - `beta_eff = 0.00651`
@@ -96,89 +193,69 @@ The engine evolves:
 - neutron population
 - delayed neutron precursor concentrations
 
-From that, the app derives:
+From that, it derives:
 
-- **thermal power**
-- **total flux**
+- thermal power
+- total flux
 
-The numerical update is implemented with an **implicit step**, which is much more stable than a naive explicit Euler step for this kind of stiff reactor kinetics system.
+The integration step is **implicit**, which keeps the browser-driven local workflow stable for this stiff kinetics system.
 
 ### Nominal scaling
 
-The app scales the normalized neutron population to approximate engineering values:
+Displayed values are scaled from nominal operating conditions:
 
 - nominal thermal power: **250 MWth**
 - nominal flux: **2.4e13 n/cm^2/s**
 
-So if neutron population doubles, both displayed power and displayed flux double.
+## 4. Time stepping and history
 
-## 4. Time stepping
-
-The UI runs the engine on `requestAnimationFrame`, but the physics is stepped using a fixed simulated step:
+The backend advances the model using:
 
 - integrator step: **0.02 s**
 - history sampling: **0.25 s**
 - chart history length: **240 points**
 - simulation speed: **8x wall clock**
+- frontend poll interval: **100 ms**
 
-This means the charts show a rolling transient window instead of storing an unbounded number of points.
+The backend, not the browser, is responsible for:
+
+- simulated elapsed time
+- history accumulation
+- pause / resume correctness
+- capping long wall-time gaps
 
 ## 5. Safety behavior
 
 There are two shutdown paths:
 
-1. **Manual SCRAM** from the button in the dashboard
+1. **Manual SCRAM** from the dashboard
 2. **Automatic SCRAM** if power exceeds **325 MWth**
 
 When SCRAM is latched:
 
 - the rod bank is forced to **100% inserted**
 - an extra shutdown reactivity penalty is applied
-- the rod slider is disabled until **Reset to critical**
-
-## App architecture
-
-The code is split into a few clear layers:
-
-- `src/simulation/model.ts`
-  - constants for geometry, kinetics parameters, and simulation tuning
-- `src/simulation/reactivity.ts`
-  - rod-position-to-reactivity mapping
-- `src/simulation/engine.ts`
-  - the reactor engine and time-step update
-- `src/hooks/useReactorSimulation.ts`
-  - React integration, animation loop, and rolling history management
-- `src/components/`
-  - schematic, metric cards, and chart rendering
-- `src/App.tsx`
-  - dashboard composition and control wiring
-
-One important design choice is that the **reactor engine lives outside the React render state**. React only reads snapshots from it. That avoids stale-state problems that are common when simulation loops are written directly with component state.
+- the slider remains disabled until reset
 
 ## What is simplified
 
-This is an educational first slice, not a high-fidelity reactor code.
+This is still an educational first slice, not a full reactor code.
 
-Some intentional simplifications:
+Intentional simplifications:
 
 - one effective rod bank instead of a full control system
 - no thermal-hydraulic feedback
-- no xenon, temperature coefficients, void coefficients, or fuel burnup
+- no xenon, temperature coefficients, void coefficients, or burnup
 - fixed heavy-water moderation assumptions
-- flux and power are scaled from nominal values rather than derived from a full core neutronics model
+- flux and power are scaled from nominal values
 - point kinetics only, with no spatial flux solution
 
-## Future extensions
+## Likely next steps
 
-Natural next steps would be:
+Now that the physics layer is in Python, natural next steps are:
 
-- moderator and fuel temperature feedback
-- coolant and heat-balance modeling
-- multiple control rods or rod banks
-- more explicit startup and shutdown procedures
-- alarms, trip logic, and operator scenarios
-- configurable reactor constants from the UI
-
-## Notes
-
-This project is meant to be **interpretable and interactive first**. The goal of the current model is to make the relationship between rod insertion, reactivity, flux, and power easy to inspect before adding more physics.
+- add temperature or moderator feedback
+- move to NumPy/SciPy-backed calculations where helpful
+- add data export or notebook workflows
+- expand startup / shutdown logic
+- decide later whether the UI should stay React or be rewritten in Python

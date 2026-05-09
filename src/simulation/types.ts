@@ -4,6 +4,34 @@ export type ReactorRegime =
   | 'supercritical'
   | 'scrammed'
 
+export type CoreGeometry = {
+  activeHeightMeters: number
+  innerRadiusMeters: number
+  outerRadiusMeters: number
+}
+
+export type ReactorModel = {
+  autoScramPowerMw: number
+  betaEffective: number
+  betaEffectivePcm: number
+  coreGeometry: CoreGeometry
+  criticalRodInsertionPercent: number
+  nominalFluxNeutronsPerSquareCentimeterSecond: number
+  nominalThermalPowerMw: number
+  neutronGenerationTimeSeconds: number
+  scramShutdownPcm: number
+  totalControlRodWorthPcm: number
+}
+
+export type SimulationTuning = {
+  historyPointLimit: number
+  historySampleSeconds: number
+  integratorStepSeconds: number
+  maxWallStepSeconds: number
+  pollIntervalMs: number
+  timeScale: number
+}
+
 export type ReactivitySnapshot = {
   baseExcessPcm: number
   dollars: number
@@ -31,4 +59,12 @@ export type HistoryPoint = {
   thermalPowerMw: number
   timeSeconds: number
   totalFlux: number
+}
+
+export type SimulationState = {
+  history: HistoryPoint[]
+  model: ReactorModel
+  running: boolean
+  snapshot: ReactorSnapshot
+  tuning: SimulationTuning
 }

@@ -3,7 +3,6 @@ import { CoreSchematic } from './components/CoreSchematic'
 import { LineChart } from './components/LineChart'
 import { MetricCard } from './components/MetricCard'
 import { useReactorSimulation } from './hooks/useReactorSimulation'
-import { reactorModel } from './simulation/model'
 import type { ReactorRegime } from './simulation/types'
 import {
   formatDollars,
@@ -36,28 +35,62 @@ const regimeCopy: Record<ReactorRegime, { title: string; body: string }> = {
 }
 
 function App() {
-  const { history, reset, running, scram, setRodInsertionPercent, setRunning, snapshot } =
+  const {
+    error,
+    history,
+    loading,
+    model,
+    reset,
+    running,
+    scram,
+    setRodInsertionPercent,
+    setRunning,
+    snapshot,
+  } =
     useReactorSimulation()
 
+  if (!snapshot || !model) {
+    return (
+      <div className="app-shell">
+        <header className="hero-header panel">
+          <div>
+            <p className="eyebrow">Bun + React + Python reactor demonstrator</p>
+            <h1>Heavy-water reactor point-kinetics sandbox</h1>
+            <p className="hero-copy">
+              The dashboard now reads its reactor state from a local Python backend
+              so the simulation core can move into the scientific Python ecosystem
+              while keeping the current browser UI.
+            </p>
+          </div>
+        </header>
+
+        <section className="panel loading-panel">
+          <h2>{loading ? 'Connecting to Python backend' : 'Backend unavailable'}</h2>
+          <p className="loading-copy">
+            {error ??
+              'Run `bun run backend:install` once, then start the hybrid stack with `bun run dev`.'}
+          </p>
+        </section>
+      </div>
+    )
+  }
+
   const status = regimeCopy[snapshot.status]
-  const powerShare =
-    (snapshot.thermalPowerMw / reactorModel.nominalThermalPowerMw) * 100
+  const powerShare = (snapshot.thermalPowerMw / model.nominalThermalPowerMw) * 100
   const fluxShare =
-    (snapshot.totalFlux /
-      reactorModel.nominalFluxNeutronsPerSquareCentimeterSecond) *
-    100
+    (snapshot.totalFlux / model.nominalFluxNeutronsPerSquareCentimeterSecond) * 100
 
   return (
     <div className="app-shell">
       <header className="hero-header panel">
         <div>
-          <p className="eyebrow">Bun + React reactor demonstrator</p>
+          <p className="eyebrow">Bun + React + Python reactor demonstrator</p>
           <h1>Heavy-water reactor point-kinetics sandbox</h1>
           <p className="hero-copy">
             This first slice models one hollow cylindrical core with fixed D2O
             moderation assumptions and one operator input: control rod insertion.
-            The dashboard tracks reactivity, total flux, and thermal power over
-            simulated time.
+            The UI stays in React, while the transient simulation now runs in a
+            local Python backend.
           </p>
         </div>
         <div className={`status-badge status-badge--${snapshot.status}`}>
@@ -88,9 +121,9 @@ function App() {
         <MetricCard
           label="Thermal power"
           value={formatPowerMw(snapshot.thermalPowerMw)}
-          detail={`${formatPercent(powerShare)} of ${reactorModel.nominalThermalPowerMw} MWth rating`}
+          detail={`${formatPercent(powerShare)} of ${model.nominalThermalPowerMw} MWth rating`}
           tone={
-            snapshot.thermalPowerMw >= reactorModel.autoScramPowerMw
+            snapshot.thermalPowerMw >= model.autoScramPowerMw
               ? 'danger'
               : powerShare >= 105
                 ? 'warning'
@@ -175,21 +208,21 @@ function App() {
             <div>
               <dt>Core annulus</dt>
               <dd>
-                {reactorModel.coreGeometry.innerRadiusMeters.toFixed(1)} m inner
-                radius to {reactorModel.coreGeometry.outerRadiusMeters.toFixed(1)} m
+                {model.coreGeometry.innerRadiusMeters.toFixed(1)} m inner radius
+                to {model.coreGeometry.outerRadiusMeters.toFixed(1)} m
               </dd>
             </div>
             <div>
               <dt>Active height</dt>
-              <dd>{reactorModel.coreGeometry.activeHeightMeters.toFixed(1)} m</dd>
+              <dd>{model.coreGeometry.activeHeightMeters.toFixed(1)} m</dd>
             </div>
             <div>
               <dt>Critical setpoint</dt>
-              <dd>{formatRodInsertion(reactorModel.criticalRodInsertionPercent)}</dd>
+              <dd>{formatRodInsertion(model.criticalRodInsertionPercent)}</dd>
             </div>
             <div>
               <dt>Rod worth</dt>
-              <dd>{reactorModel.totalControlRodWorthPcm} pcm total bank worth</dd>
+              <dd>{model.totalControlRodWorthPcm} pcm total bank worth</dd>
             </div>
           </dl>
         </article>
@@ -213,7 +246,7 @@ function App() {
           />
           <LineChart
             title="Thermal power trend"
-            subtitle="Power is scaled from nominal 250 MWth. Automatic SCRAM trips at 325 MWth."
+            subtitle={`Power is scaled from nominal ${model.nominalThermalPowerMw} MWth. Automatic SCRAM trips at ${model.autoScramPowerMw} MWth.`}
             color="#f97316"
             data={history}
             valueAccessor={(point) => point.thermalPowerMw}
@@ -230,8 +263,8 @@ function App() {
             <li>One annular core with a fixed heavy-water moderation assumption.</li>
             <li>One operator-controlled rod bank with sinusoidal worth shaping.</li>
             <li>
-              Six delayed neutron groups with an implicit time step for stable
-              browser-side integration.
+              Six delayed neutron groups solved in the Python backend with a
+              stable implicit integration step.
             </li>
           </ul>
         </article>

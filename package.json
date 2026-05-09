@@ -4,7 +4,10 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "backend:install": "cd backend && uv sync",
+    "dev": "concurrently -k -n backend,frontend -c magenta,cyan \"bun run dev:backend\" \"bun run dev:frontend\"",
+    "dev:backend": "cd backend && uv run uvicorn reactor_backend.app:app --reload --app-dir . --host 127.0.0.1 --port 8000",
+    "dev:frontend": "vite --host 127.0.0.1",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview"
@@ -19,6 +22,7 @@
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.1",
+    "concurrently": "^9.2.1",
     "eslint": "^10.2.1",
     "eslint-plugin-react-hooks": "^7.1.1",
     "eslint-plugin-react-refresh": "^0.5.2",
