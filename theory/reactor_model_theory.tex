@@ -1,0 +1,393 @@
+\documentclass[11pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{booktabs}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+
+\title{Physics Basis of the Current Reactor Web App Model}
+\author{}
+\date{}
+
+\begin{document}
+
+\maketitle
+
+\section{Purpose of this note}
+
+This document explains the physics behind the current simulator implementation in
+the repository. The model is intentionally simple: it is a \emph{point kinetics}
+transient model with one control input (control rod insertion), one lumped core,
+and fixed heavy-water moderation assumptions.
+
+The most important point is the following:
+
+\begin{quote}
+The current model is \textbf{not} a full diffusion or transport calculation of a
+heavy-water reactor. It is a point-kinetics model whose control-rod worth curve
+is \textbf{inspired by} the fundamental axial shape from one-group diffusion
+theory.
+\end{quote}
+
+So the answer to ``did you use one-group diffusion?'' is:
+
+\begin{itemize}
+  \item \textbf{For the transient equations: no.} The time evolution is point kinetics.
+  \item \textbf{For the rod worth shape: approximately yes.} The cumulative rod-worth
+  function was chosen so that its \emph{differential} worth follows the kind of
+  $\sin^2$ axial weighting one would expect from the fundamental flux shape in a
+  one-group diffusion picture.
+\end{itemize}
+
+\section{What the model assumes}
+
+The model makes the standard point-kinetics assumption that the neutron flux can
+be factored into a fixed shape and a time-dependent amplitude,
+\[
+\phi(\mathbf{r}, E, t) \approx n(t)\,\psi(\mathbf{r}, E),
+\]
+where:
+\begin{itemize}
+  \item $\psi(\mathbf{r}, E)$ is a fixed normalized shape,
+  \item $n(t)$ is the time-dependent neutron population amplitude.
+\end{itemize}
+
+This means that all spatial information is collapsed into a single amplitude. In
+other words, the code assumes that control motion changes reactivity, but does
+not reshape the flux in space.
+
+That is why the current model can produce:
+\begin{itemize}
+  \item reactivity versus time,
+  \item flux amplitude versus time,
+  \item power versus time,
+\end{itemize}
+but it cannot yet produce:
+\begin{itemize}
+  \item radial power peaking,
+  \item axial power peaking,
+  \item local flux depression around rods,
+  \item explicit moderator or temperature feedback.
+\end{itemize}
+
+\section{Point kinetics equations}
+
+The transient core model is the standard six-group delayed-neutron point kinetics
+system:
+\begin{align}
+\frac{dn}{dt} &= \frac{\rho - \beta}{\Lambda}\,n + \sum_{i=1}^{6}\lambda_i C_i,
+\\
+\frac{dC_i}{dt} &= \frac{\beta_i}{\Lambda}\,n - \lambda_i C_i,
+\qquad i = 1,\dots,6.
+\end{align}
+
+Here:
+\begin{itemize}
+  \item $n(t)$ is the normalized neutron population,
+  \item $\rho$ is the reactivity in $\Delta k/k$,
+  \item $\beta = \sum_i \beta_i$ is the effective delayed neutron fraction,
+  \item $\Lambda$ is the prompt neutron generation time,
+  \item $C_i$ is the precursor concentration of delayed group $i$,
+  \item $\lambda_i$ is the decay constant of delayed group $i$.
+\end{itemize}
+
+The code uses the following values:
+\begin{align*}
+\beta_{\mathrm{eff}} &= 0.00651, \\
+\Lambda &= 5\times 10^{-4}\ \mathrm{s}.
+\end{align*}
+
+The delayed neutron group data currently used are:
+
+\begin{center}
+\begin{tabular}{ccc}
+\toprule
+Group $i$ & $\beta_i$ & $\lambda_i$ [s$^{-1}$] \\
+\midrule
+1 & 0.00025 & 0.0124 \\
+2 & 0.00138 & 0.0305 \\
+3 & 0.00122 & 0.1110 \\
+4 & 0.00264 & 0.3010 \\
+5 & 0.00075 & 1.1400 \\
+6 & 0.00027 & 3.0100 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+These are best interpreted as \textbf{generic thermal-reactor point-kinetics
+data}, not as a lattice-physics fit to a specific heavy-water reactor design.
+
+\subsection{Power and flux scaling}
+
+The solver evolves only the normalized neutron population. Displayed power and
+flux are then obtained from
+\begin{align}
+P(t) &= P_0\,n(t), \\
+\Phi(t) &= \Phi_0\,n(t),
+\end{align}
+with the nominal values
+\begin{align*}
+P_0 &= 250\ \mathrm{MW_{th}}, \\
+\Phi_0 &= 2.4\times 10^{13}\ \mathrm{n\,cm^{-2}\,s^{-1}}.
+\end{align*}
+
+So if $n(t)$ doubles, both displayed power and displayed total flux double.
+
+\subsection{Numerical time integration}
+
+The code does not use an explicit Euler update. Instead it uses a semi-implicit
+update to avoid instability in this stiff kinetics system.
+
+For each time step $\Delta t$, the precursor equations are written as
+\[
+C_i^{k+1} =
+\frac{C_i^k + \Delta t\,(\beta_i/\Lambda)\,n^{k+1}}
+{1 + \lambda_i \Delta t}.
+\]
+
+Substituting these into the neutron balance gives a closed equation for
+$n^{k+1}$. This is why the simulator remains stable at the chosen time step even
+for moderate positive reactivity insertions.
+
+\section{Why these reactor dimensions were chosen}
+
+The current \texttt{REACTOR\_MODEL} stores:
+\begin{align*}
+R_{\mathrm{in}} &= 0.8\ \mathrm{m}, \\
+R_{\mathrm{out}} &= 2.2\ \mathrm{m}, \\
+H &= 5.8\ \mathrm{m}.
+\end{align*}
+
+These define an \textbf{annular core} with:
+\begin{itemize}
+  \item inner radius $R_{\mathrm{in}} = 0.8$ m,
+  \item outer radius $R_{\mathrm{out}} = 2.2$ m,
+  \item active height $H = 5.8$ m.
+\end{itemize}
+
+The corresponding cross-sectional area is
+\[
+A = \pi\left(R_{\mathrm{out}}^2 - R_{\mathrm{in}}^2\right)
+  = \pi(2.2^2 - 0.8^2)
+  \approx 13.19\ \mathrm{m}^2,
+\]
+and the active volume is
+\[
+V = A H \approx 76.53\ \mathrm{m}^3.
+\]
+
+At the nominal thermal power $P_0 = 250$ MW$_{\mathrm{th}}$, this corresponds to
+an average volumetric power density of
+\[
+\frac{P_0}{V} \approx 3.27\ \mathrm{MW\,m^{-3}}.
+\]
+
+This is a \textbf{reasonable order-of-magnitude engineering choice} for a
+low-resolution educational model: it gives a core that is neither unrealistically
+tiny nor excessively dilute.
+
+\subsection{What these dimensions do and do not mean}
+
+The dimensions were chosen to support a physically sensible interpretation:
+\begin{itemize}
+  \item an annular fuel region around a central moderator channel,
+  \item enough core height for a meaningful top-inserted control rod,
+  \item a core volume consistent with the nominal power scale.
+\end{itemize}
+
+However, in the current code these dimensions are \textbf{not used to compute}
+\begin{itemize}
+  \item critical buckling,
+  \item diffusion coefficients,
+  \item migration area,
+  \item geometric buckling $B_g^2$,
+  \item leakage,
+  \item rod worth from first principles.
+\end{itemize}
+
+So the geometry is presently \textbf{descriptive and interpretive}, not yet
+predictive. It defines what kind of core the point model is intended to
+represent, but it is not itself closing the neutronics problem.
+
+\section{How the control rod model was constructed}
+
+\subsection{The implemented reactivity law}
+
+Let $x \in [0,1]$ be the rod insertion fraction, with
+\[
+x = \frac{\text{rod insertion percent}}{100}.
+\]
+
+The code defines the cumulative rod-worth shape as
+\[
+W(x) = x - \frac{\sin(2\pi x)}{2\pi}.
+\]
+
+The total rod contribution to reactivity is then
+\[
+\rho_{\mathrm{rod}}(x) = -\rho_{\mathrm{rod,max}}\,W(x),
+\]
+with
+\[
+\rho_{\mathrm{rod,max}} = 700\ \mathrm{pcm}.
+\]
+
+The total reactivity in pcm is
+\[
+\rho_{\mathrm{tot,pcm}}(x)
+=
+\rho_{\mathrm{base}}
+\rho_{\mathrm{rod}}(x)
+\rho_{\mathrm{scram}}.
+\]
+where:
+\begin{itemize}
+  \item $\rho_{\mathrm{base}}$ is chosen so that the reactor is critical at
+  50\% insertion,
+  \item $\rho_{\mathrm{scram}} = -450$ pcm when SCRAM is latched,
+  \item otherwise $\rho_{\mathrm{scram}} = 0$.
+\end{itemize}
+
+Because the critical insertion is set to $x_c = 0.5$,
+\[
+\rho_{\mathrm{base}} = \rho_{\mathrm{rod,max}}\,W(0.5).
+\]
+Since $W(0.5) = 0.5$, this gives
+\[
+\rho_{\mathrm{base}} = 350\ \mathrm{pcm}.
+\]
+
+Therefore:
+\begin{itemize}
+  \item at 50\% insertion, the core is nominally critical,
+  \item withdrawing rods below 50\% adds positive reactivity,
+  \item inserting rods above 50\% adds negative reactivity.
+\end{itemize}
+
+\subsection{Why this function is physically plausible}
+
+The key observation is that
+\[
+\frac{dW}{dx} = 1 - \cos(2\pi x) = 2\sin^2(\pi x).
+\]
+
+So the \emph{differential} rod worth is proportional to
+\[
+\sin^2(\pi x).
+\]
+
+That is exactly the kind of shape one gets if:
+\begin{enumerate}
+  \item the core is dominated by the fundamental axial mode,
+  \item the axial neutron flux is approximated by
+  \[
+  \phi(z) \propto \sin\left(\frac{\pi z}{H}\right),
+  \]
+  \item local control rod effectiveness is proportional to the local importance
+  or, in a crude approximation, to $\phi(z)^2$.
+\end{enumerate}
+
+Under those assumptions, the differential rod worth is largest near the axial
+midplane and smallest near the top and bottom ends. Integrating that axial
+weighting from the top of the core to insertion depth $z$ gives precisely a
+cumulative function of the form
+\[
+W(x) = \int_0^x 2\sin^2(\pi u)\,du
+     = x - \frac{\sin(2\pi x)}{2\pi}.
+\]
+
+\subsection{So: was one-group diffusion used?}
+
+\textbf{Not as a solved reactor model.} The code does \emph{not} solve the
+one-group diffusion equation
+\[
+-D \nabla^2 \phi + \Sigma_a \phi = \frac{1}{k}\nu\Sigma_f \phi
+\]
+for this annular geometry, and it does not compute rod worth by perturbing a
+diffusion eigenvalue.
+
+But \textbf{yes, the rod-worth shape is motivated by the fundamental mode logic}
+that one would get from one-group diffusion in the axial direction. More
+precisely:
+\begin{itemize}
+  \item the current model \emph{borrows the shape} of a diffusion-theory
+  fundamental mode,
+  \item but it \emph{does not perform} a diffusion-theory criticality or rod-worth
+  calculation.
+\end{itemize}
+
+That makes the current rod model a \textbf{physics-inspired ansatz}, not a
+first-principles diffusion result.
+
+\section{Heavy-water interpretation}
+
+The code labels the core as heavy-water moderated, but heavy water does not yet
+appear through explicit moderator equations. In the current model, this means:
+\begin{itemize}
+  \item the reactor is intended to be interpreted as a thermalized, D$_2$O
+  moderated system,
+  \item the annular geometry with a central low-absorption moderator region is
+  meant to be qualitatively consistent with that picture,
+  \item the delayed-neutron and kinetics constants are still generic thermal
+  reactor values rather than a calibrated CANDU-style lattice data set.
+\end{itemize}
+
+So ``heavy-water moderated'' is presently a \textbf{modeling context}, not yet a
+material-property calculation.
+
+\section{What is heuristic and what is derived}
+
+\subsection{Reasonably physics-based pieces}
+
+\begin{itemize}
+  \item Standard six-group point kinetics equations.
+  \item Standard interpretation of reactivity in $\Delta k/k$.
+  \item A rod differential worth proportional to a fundamental-mode
+  $\sin^2$ weighting.
+  \item Power and flux proportional to neutron population amplitude.
+\end{itemize}
+
+\subsection{Heuristic or tuned pieces}
+
+\begin{itemize}
+  \item The actual annular dimensions are engineering choices, not diffusion-derived.
+  \item The total rod worth of 700 pcm is a tuning choice.
+  \item The extra SCRAM penalty of 450 pcm is a tuning choice to ensure shutdown margin.
+  \item The nominal power and nominal flux are scale-setting choices.
+  \item The model does not yet include temperature, void, xenon, or burnup feedbacks.
+\end{itemize}
+
+\section{How to make the model more rigorous}
+
+If a more physics-grounded reactor model is desired, the next upgrade would be:
+
+\begin{enumerate}
+  \item Choose a specific reactor type and fuel/moderator composition.
+  \item Solve a one-group or multi-group diffusion eigenvalue problem in the
+  annular geometry to obtain the spatial flux shape and $k_{\mathrm{eff}}$.
+  \item Derive geometric buckling from the actual dimensions.
+  \item Compute control rod worth from perturbation theory or repeated
+  eigenvalue solves with varying insertion depth.
+  \item Derive $\beta_{\mathrm{eff}}$, $\Lambda$, and nominal flux/power from a
+  consistent lattice/core model.
+  \item Only then reduce that spatial model to a calibrated point-kinetics surrogate.
+\end{enumerate}
+
+\section{Bottom line}
+
+The current simulator is best described as:
+
+\begin{quote}
+A point-kinetics reactor transient model with six delayed neutron groups, a
+heuristically scaled annular heavy-water-reactor geometry, and a control rod
+worth curve chosen to mimic the axial fundamental-mode weighting suggested by
+one-group diffusion theory.
+\end{quote}
+
+That is physically interpretable and useful for an educational transient model,
+but it is not yet a full spatial reactor calculation.
+
+\end{document}
