@@ -254,8 +254,7 @@ Intentional simplifications:
 
 Now that the physics layer is in Python, natural next steps are:
 
-- add temperature or moderator feedback
-- move to NumPy/SciPy-backed calculations where helpful
-- add data export or notebook workflows
-- expand startup / shutdown logic
-- decide later whether the UI should stay React or be rewritten in Python
+- include one group diffusion results from analytical python
+- maybe solve time dependent diffusion equation instead of point kinetics?
+- visualization of axial and radial flux distribution (inspiration form inspo folder)
+- integrate Modelica FMU for simple systems thermal hydraulics
