@@ -447,6 +447,88 @@ def rho_pcm(k: float) -> float:
     return (k - 1.0) / k * 1e5
 
 
+def with_fuel_radius_2d(model: Model2D, r_fuel: float, h_to_r: float = 2.0) -> Model2D:
+    """Return a copy of *model* with R_fuel (and H = h_to_r × R_fuel) updated.
+
+    The radial and axial reflector thicknesses are kept fixed.
+    """
+    refl_thickness = model.base.R_refl - model.base.R_fuel
+    new_base = replace(model.base, R_fuel=r_fuel, R_refl=r_fuel + refl_thickness)
+    return replace(model, base=new_base, H=h_to_r * r_fuel)
+
+
+def find_critical_radius_2d(
+    template: Model2D,
+    lo_cm: float,
+    hi_cm: float,
+    dr: float = 5.0,
+    dz: float = 5.0,
+    tol: float = 1e-4,
+    max_it: int = 35,
+    h_to_r: float = 2.0,
+) -> tuple[Model2D, dict]:
+    """Find the fuel outer radius that makes a 2D r–z core critical.
+
+    Bisects over ``R_fuel`` in [lo_cm, hi_cm] while keeping R_inner, all
+    region cross-sections, H_refl, and the rod geometry fixed.  The active
+    height is updated as ``H = h_to_r × R_fuel``.
+
+    Parameters
+    ----------
+    template:
+        A Model2D whose fixed parameters (R_inner, region constants, H_refl,
+        r_rod, dSa_rod) define the search space.  R_fuel and H are varied.
+    lo_cm, hi_cm:
+        Bracket for R_fuel.  k_eff must be sub-critical at lo_cm and
+        super-critical at hi_cm.
+    dr, dz:
+        Mesh spacing (cm) for the search-phase solves.  Coarser is faster;
+        use ~3 cm for a final re-solve after the search.
+    tol:
+        Convergence criterion on |k_eff − 1|.
+    max_it:
+        Maximum bisection iterations.
+    h_to_r:
+        Aspect ratio H = h_to_r × R_fuel (default 2.0).
+
+    Returns
+    -------
+    (Model2D, dict)
+        The critical Model2D and the corresponding solve_2d result dict.
+    """
+
+    def candidate(r_fuel: float) -> Model2D:
+        return with_fuel_radius_2d(template, r_fuel, h_to_r=h_to_r)
+
+    def k_at(r_fuel: float) -> tuple[float, dict]:
+        sol = solve_2d(candidate(r_fuel), dr=dr, dz=dz, x_insert=0.0, max_iter=300, tol=1e-5)
+        return sol["k_eff"], sol
+
+    k_lo, _ = k_at(lo_cm)
+    k_hi, _ = k_at(hi_cm)
+    if k_lo >= 1.0 or k_hi <= 1.0:
+        raise ValueError(
+            f"k_eff not bracketed: k({lo_cm:.0f})={k_lo:.5f}, k({hi_cm:.0f})={k_hi:.5f}. "
+            "Widen the search range or check material constants."
+        )
+
+    lo, hi = lo_cm, hi_cm
+    for _ in range(max_it):
+        mid = 0.5 * (lo + hi)
+        k_mid, sol_mid = k_at(mid)
+        if abs(k_mid - 1.0) < tol:
+            return candidate(mid), sol_mid
+        if k_mid < 1.0:
+            lo = mid
+        else:
+            hi = mid
+
+    mid = 0.5 * (lo + hi)
+    final_model = candidate(mid)
+    _, final_sol = k_at(mid)
+    return final_model, final_sol
+
+
 __all__ = [
     "AnnularModel",
     "Model2D",
@@ -454,6 +536,7 @@ __all__ = [
     "build_2d_matrices",
     "build_operators",
     "find_critical_radius",
+    "find_critical_radius_2d",
     "harmonic_mean",
     "make_rod_region",
     "rho_pcm",
@@ -462,4 +545,5 @@ __all__ = [
     "solve_keff",
     "solve_tridiagonal",
     "with_fuel_radius",
+    "with_fuel_radius_2d",
 ]
