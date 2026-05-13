@@ -258,3 +258,14 @@ Now that the physics layer is in Python, natural next steps are:
 - maybe solve time dependent diffusion equation instead of point kinetics?
 - visualization of axial and radial flux distribution (inspiration form inspo folder)
 - integrate Modelica FMU for simple systems thermal hydraulics
+
+
+FIXES NOTEBOOK:
+- does radial solution take too much space?
+  - I think removing the radial solution and just using the 2D one is a good approach. It introduces a significant modeling error on the axial flux. Lets remove that and just focus on the 2D approach
+- For the 2D approach we should get dimensions that make the reactor slightly overcritical. Perhaps iteration like in a gridsearch (idea from ML) or what method would you recommend to be able to get a geometry that gives k = 1.0000
+- same question but for control rod, to get proper negative pcm?
+- restructure folders. src (which is just frontend) to be renamed to frontend and bundled together with the bun, eslint, package, vite and tsconfig files. backend, which has the core python backend and physics solvers to be renamed approprietly (reactor-app?)
+- python general solver for diffusion that can be used by both notebook and backend
+- in reactorModel.ipynb use these diffusion solvers for the numerical calculations, instead of defining the solvers inside the notebook
+
