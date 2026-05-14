@@ -48,20 +48,24 @@ DELAYED_NEUTRON_GROUPS = (
 )
 
 REACTOR_MODEL = ReactorModelConfig(
-    auto_scram_power_mw=325,
+    # Scram at 1.3 × nominal power (Estimate 2 baseline: 20 MWth)
+    auto_scram_power_mw=26,
     beta_effective=0.00651,
     beta_effective_pcm=651,
+    # Estimate 2 geometry (2D-critical clean core, from theory/reactorModel.ipynb)
     core_geometry=CoreGeometryConfig(
-        active_height_meters=5.8,
-        inner_radius_meters=0.8,
-        outer_radius_meters=2.2,
+        active_height_meters=6.912,   # H_active = 691.2 cm
+        inner_radius_meters=0.80,     # R_inner  =  80.0 cm (unchanged)
+        outer_radius_meters=3.456,    # R_fuel   = 345.6 cm
     ),
-    critical_rod_insertion_percent=50,
-    nominal_flux_neutrons_per_square_centimeter_second=2.4e13,
-    nominal_thermal_power_mw=250,
+    # Clean unrodded core is the critical reference; any rod insertion adds
+    # only negative worth (full bank worth ≈ −29 pcm from 2D r-z scan).
+    critical_rod_insertion_percent=0,
+    nominal_flux_neutrons_per_square_centimeter_second=1.5e12,
+    nominal_thermal_power_mw=20,
     neutron_generation_time_seconds=5e-4,
     scram_shutdown_pcm=450,
-    total_control_rod_worth_pcm=700,
+    total_control_rod_worth_pcm=29.0,  # magnitude of full-insertion worth (pcm)
 )
 
 SIMULATION_TUNING = SimulationTuningConfig(

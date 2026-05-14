@@ -150,11 +150,11 @@ The frontend treats the backend as the **source of truth** for:
 
 ## 1. Core model
 
-The reactor is treated as a simplified **annular core**:
+The reactor is treated as a simplified **annular core** (Estimate 2 geometry from `theory/reactorModel.ipynb`):
 
 - inner radius: **0.8 m**
-- outer radius: **2.2 m**
-- active height: **5.8 m**
+- outer radius: **3.456 m** (R_fuel = 345.6 cm from 2D critical search)
+- active height: **6.912 m** (aspect ratio ≈ 1 for the full annular zone)
 
 Heavy water moderation is a **fixed assumption** in this version.
 
@@ -162,17 +162,24 @@ Heavy water moderation is a **fixed assumption** in this version.
 
 The only operator input is **rod insertion percent**.
 
-Rod position is converted into reactivity with a smooth cumulative rod-worth shape:
+Rod position is converted into reactivity using a **2D-calibrated rod-worth table** derived from `theory/reactorModel.ipynb`:
 
-`worth(z) = z - sin(2*pi*z) / (2*pi)`
+- The clean, unrodded core is the **critical reference** (0 % insertion → ρ = 0 pcm).
+- The table stores Δρ(x) at 11 points (x = 0.0 to 1.0 in steps of 0.1) from a 2D r-z finite-difference one-group diffusion eigenvalue scan.
+- Backend interpolation is linear between table points.
+- Rod insertion adds only **negative reactivity**; the full-bank worth is ≈ **−29 pcm**.
 
-where `z` is insertion fraction from `0` to `1`.
+Current calibration values (frozen from the notebook):
 
-Current tuning values:
+| x (insertion fraction) | Δρ (pcm) |
+|---|---|
+| 0.0 | 0.0 (reference) |
+| 0.1 | +0.6 (mesh artefact) |
+| 0.2 | −0.9 |
+| 0.5 | −13.4 |
+| 1.0 | −29.0 |
 
-- total rod bank worth: **700 pcm**
-- critical rod insertion target: **50%**
-- extra SCRAM shutdown margin: **450 pcm**
+Extra SCRAM shutdown margin: **450 pcm**
 
 The dashboard shows reactivity in **pcm**, while the kinetics solver uses **delta-k/k** internally:
 
@@ -204,8 +211,8 @@ The integration step is **implicit**, which keeps the browser-driven local workf
 
 Displayed values are scaled from nominal operating conditions:
 
-- nominal thermal power: **250 MWth**
-- nominal flux: **2.4e13 n/cm^2/s**
+- nominal thermal power: **20 MWth**
+- nominal flux: **1.5 × 10¹² n/cm²/s** (Estimate 2 annular-core peak, 2D solution)
 
 ## 4. Time stepping and history
 
@@ -229,7 +236,7 @@ The backend, not the browser, is responsible for:
 There are two shutdown paths:
 
 1. **Manual SCRAM** from the dashboard
-2. **Automatic SCRAM** if power exceeds **325 MWth**
+2. **Automatic SCRAM** if power exceeds **26 MWth** (1.3 × nominal)
 
 When SCRAM is latched:
 
