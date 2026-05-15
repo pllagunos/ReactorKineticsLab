@@ -8,7 +8,7 @@
 \usepackage[utf8]{inputenc}
 \usepackage{lmodern}
 
-\title{Physics Basis of the Current Reactor Web App Model}
+\title{How \texttt{reactorModel.ipynb} Drives the Reactor Web App}
 \author{}
 \date{}
 
@@ -16,96 +16,217 @@
 
 \maketitle
 
-\section{Purpose of this note}
+\section{Purpose}
 
-This document explains the physics behind the current simulator implementation in
-the repository. The model is intentionally simple: it is a \emph{point kinetics}
-transient model with one control input (control rod insertion), one lumped core,
-and fixed heavy-water moderation assumptions.
+This note explains how the repository's physics is split across:
+\begin{itemize}
+  \item the exploratory notebook \texttt{theory/reactorModel.ipynb},
+  \item the point-kinetics web simulation shown on the \emph{Overview} page,
+  \item the steady 2D diffusion solve shown on the \emph{Core} page,
+  \item and the direct time-dependent diffusion solve shown on the
+  \emph{Transient Diffusion} page.
+\end{itemize}
 
-The most important point is the following:
+The notebook is the \textbf{source of modeling logic and calibration workflow}.
+The web app is the \textbf{interactive execution layer}.  The most important
+architectural point is:
 
 \begin{quote}
-The current model is \textbf{not} a full diffusion or transport calculation of a
-heavy-water reactor. It is a point-kinetics model whose control-rod worth curve
-is \textbf{inspired by} the fundamental axial shape from one-group diffusion
-theory.
+The repository now contains \textbf{two transient models}: a fast
+\textbf{point-kinetics surrogate} for the Overview page, and a
+\textbf{spatially resolved 2D diffusion transient} for the Transient Diffusion
+page.  Both are tied back to the same one-group annular-core assumptions and
+the same notebook-derived calibration data.
 \end{quote}
 
-So the answer to ``did you use one-group diffusion?'' is:
+\section{What the notebook does}
 
-\begin{itemize}
-  \item \textbf{For the transient equations: no.} The time evolution is point kinetics.
-  \item \textbf{For the rod worth shape: approximately yes.} The cumulative rod-worth
-  function was chosen so that its \emph{differential} worth follows the kind of
-  $\sin^2$ axial weighting one would expect from the fundamental flux shape in a
-  one-group diffusion picture.
-\end{itemize}
+The notebook \texttt{theory/reactorModel.ipynb} studies a heavy-water moderated
+annular reactor with cylindrical symmetry in $(r,z)$ and a top-inserted central
+control/shutdown bank.  It has two estimation levels.
 
-\section{What the model assumes}
+\subsection{Estimate 1: homogeneous buckling sanity check}
 
-The model makes the standard point-kinetics assumption that the neutron flux can
-be factored into a fixed shape and a time-dependent amplitude,
+The first estimate is a coarse analytical model based on one-speed diffusion
+theory in a homogeneous bare cylinder:
 \[
-\phi(\mathbf{r}, E, t) \approx n(t)\,\psi(\mathbf{r}, E),
+-D\nabla^2 \phi + \Sigma_a \phi = \frac{1}{k}\nu\Sigma_f \phi.
 \]
-where:
+
+The criticality condition is written as
+\[
+B_m^2 = \frac{\nu\Sigma_f - \Sigma_a}{D} = B_g^2,
+\]
+with geometric buckling for a finite cylinder approximated by
+\[
+B_g^2 \approx \left(\frac{2.405}{R}\right)^2 + \left(\frac{\pi}{H}\right)^2.
+\]
+
+In the notebook this estimate is used only as a \textbf{first-pass size check}.
+It is intentionally approximate because it ignores:
 \begin{itemize}
-  \item $\psi(\mathbf{r}, E)$ is a fixed normalized shape,
-  \item $n(t)$ is the time-dependent neutron population amplitude.
+  \item the inner moderator hole,
+  \item reflector heterogeneity,
+  \item explicit axial reflector slabs,
+  \item and the geometric control rod.
 \end{itemize}
 
-This means that all spatial information is collapsed into a single amplitude. In
-other words, the code assumes that control motion changes reactivity, but does
-not reshape the flux in space.
+\subsection{Estimate 2: full 2D $r$--$z$ finite-difference diffusion model}
 
-That is why the current model can produce:
+The second estimate is the notebook's main result.  It solves a one-group
+diffusion eigenvalue problem on a cylindrical $r$--$z$ mesh:
+\[
+-\nabla \cdot \left(D \nabla \phi\right) + \Sigma_a \phi
+= \frac{1}{k_{\mathrm{eff}}}\nu\Sigma_f \phi.
+\]
+
+This estimate captures:
 \begin{itemize}
-  \item reactivity versus time,
-  \item flux amplitude versus time,
-  \item power versus time,
+  \item radial and axial leakage,
+  \item the annular fuel geometry,
+  \item inner and outer D$_2$O regions,
+  \item axial reflector slabs,
+  \item and the real rod tip position as insertion changes.
 \end{itemize}
-but it cannot yet produce:
+
+The notebook uses this model to:
+\begin{enumerate}
+  \item search for critical annular geometry,
+  \item compute the clean-core eigenvalue,
+  \item scan rod insertion versus reactivity,
+  \item and convert that scan into the calibration constants later frozen in the
+        backend.
+\end{enumerate}
+
+\section{Geometry, materials, and assumptions}
+
+\subsection{Core layout}
+
+The modeled reactor is an annular cylindrical core with a central D$_2$O region,
+a homogenized fuel annulus, and an outer D$_2$O reflector.  The current frozen
+geometry in \texttt{backend/reactor\_backend/}\linebreak\texttt{calibration.py}
+is:
+
+\begin{center}
+\begin{tabular}{lc}
+\toprule
+Quantity & Value \\
+\midrule
+Inner moderator radius $R_{\mathrm{inner}}$ & $80.0$ cm \\
+Fuel outer radius $R_{\mathrm{fuel}}$ & $345.6$ cm \\
+Reflector outer radius $R_{\mathrm{refl}}$ & $405.6$ cm \\
+Active height $H$ & $691.2$ cm \\
+Axial reflector thickness $H_{\mathrm{refl}}$ & $60.0$ cm per side \\
+Equivalent rod radius $r_{\mathrm{rod}}$ & $50.0$ cm \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The model is axisymmetric, so the mesh covers only $r \ge 0$ while still
+representing the full 3D core through cylindrical volume weighting
+$2\pi r\,dr\,dz$.
+
+\subsection{One-group effective constants}
+
+The notebook starts from microscopic cross sections at the 2200 m/s thermal
+reference point and then builds \textbf{engineering-effective} one-group
+constants.  The production code uses the following frozen values:
+
+\begin{center}
+\begin{tabular}{lccc}
+\toprule
+Region & $D$ [cm] & $\Sigma_a$ [cm$^{-1}$] & $\nu\Sigma_f$ [cm$^{-1}$] \\
+\midrule
+Inner D$_2$O moderator & $1.25$ & $3.5\times 10^{-4}$ & $0$ \\
+Fuel annulus & $0.95$ & $8.5\times 10^{-3}$ & $8.59\times 10^{-3}$ \\
+Outer D$_2$O reflector & $1.15$ & $4.0\times 10^{-4}$ & $0$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+These are \textbf{homogenized one-group constants}, not a multigroup transport
+library.  The fuel values intentionally fold together:
 \begin{itemize}
-  \item radial power peaking,
-  \item axial power peaking,
-  \item local flux depression around rods,
-  \item explicit moderator or temperature feedback.
+  \item natural uranium fuel,
+  \item D$_2$O moderation inside the lattice,
+  \item resonance/self-shielding effects,
+  \item and spectrum averaging into one effective thermal group.
 \end{itemize}
 
-\section{Point kinetics equations}
+The control bank is represented as an added absorber in the inner moderator
+region with
+\[
+\Delta \Sigma_{a,\mathrm{rod,max}} = 0.25\ \mathrm{cm}^{-1}.
+\]
+This is likewise an effective one-group quantity rather than a detailed rod-cell
+transport model.
 
-The transient core model is the standard six-group delayed-neutron point kinetics
+\subsection{Boundary assumptions}
+
+The diffusion solves use extrapolated zero-flux boundaries rather than placing
+the computational boundary exactly at the physical reflector edge.  In code this
+is represented by an extrapolation factor of $2.13 D_{\mathrm{refl}}$, so the
+radial and axial computational extents are larger than the physical core.
+
+\section{How the notebook feeds the web app}
+
+The notebook does \emph{not} run the web app directly.  Instead it establishes
+the physical basis that is later frozen into backend constants and reusable
+solver code:
+
+\begin{enumerate}
+  \item \textbf{Estimate 1} gives an analytical reference for rough critical size.
+  \item \textbf{Estimate 2} performs the annular $r$--$z$ diffusion study used
+        for production calibration.
+  \item The resulting geometry, material constants, and rod-worth data are copied
+        into \texttt{calibration.py}.
+  \item The backend then exposes two kinds of runtime models:
+        \begin{itemize}
+          \item a calibrated point-kinetics model for fast dashboard transients,
+          \item and spatial diffusion solvers for the Core and Transient pages.
+        \end{itemize}
+\end{enumerate}
+
+So the notebook is best viewed as the \textbf{physics derivation and calibration
+workspace}, while the Python backend is the \textbf{production implementation}.
+
+\section{Overview page: point-kinetics transient model}
+
+\subsection{Governing equations}
+
+The Overview page uses the standard six-group delayed-neutron point-kinetics
 system:
 \begin{align}
-\frac{dn}{dt} &= \frac{\rho - \beta}{\Lambda}\,n + \sum_{i=1}^{6}\lambda_i C_i,
+\frac{dn}{dt} &= \frac{\rho - \beta}{\Lambda} n + \sum_{i=1}^{6}\lambda_i C_i,
 \\
-\frac{dC_i}{dt} &= \frac{\beta_i}{\Lambda}\,n - \lambda_i C_i,
-\qquad i = 1,\dots,6.
+\frac{dC_i}{dt} &= \frac{\beta_i}{\Lambda} n - \lambda_i C_i,
+\qquad i=1,\dots,6.
 \end{align}
 
 Here:
 \begin{itemize}
   \item $n(t)$ is the normalized neutron population,
-  \item $\rho$ is the reactivity in $\Delta k/k$,
-  \item $\beta = \sum_i \beta_i$ is the effective delayed neutron fraction,
+  \item $\rho$ is reactivity in $\Delta k/k$,
+  \item $\beta = \sum_i \beta_i$ is the effective delayed-neutron fraction,
   \item $\Lambda$ is the prompt neutron generation time,
-  \item $C_i$ is the precursor concentration of delayed group $i$,
-  \item $\lambda_i$ is the decay constant of delayed group $i$.
+  \item $C_i$ is precursor concentration for delayed group $i$,
+  \item $\lambda_i$ is the delayed-group decay constant.
 \end{itemize}
 
-The code uses the following values:
+\subsection{Constants used by the web app}
+
+The current production constants in \texttt{config.py} are:
 \begin{align*}
-\beta_{\mathrm{eff}} &= 0.00651, \\
+\beta_{\mathrm{eff}} &= 0.00651 = 651\ \mathrm{pcm}, \\
 \Lambda &= 5\times 10^{-4}\ \mathrm{s}.
 \end{align*}
 
-The delayed neutron group data currently used are:
+The six delayed groups are:
 
 \begin{center}
 \begin{tabular}{ccc}
 \toprule
-Group $i$ & $\beta_i$ & $\lambda_i$ [s$^{-1}$] \\
+Group & $\beta_i$ & $\lambda_i$ [s$^{-1}$] \\
 \midrule
 1 & 0.00025 & 0.0124 \\
 2 & 0.00138 & 0.0305 \\
@@ -117,277 +238,271 @@ Group $i$ & $\beta_i$ & $\lambda_i$ [s$^{-1}$] \\
 \end{tabular}
 \end{center}
 
-These are best interpreted as \textbf{generic thermal-reactor point-kinetics
-data}, not as a lattice-physics fit to a specific heavy-water reactor design.
+Displayed output is scaled from the nominal operating point
+\[
+P_0 = 20\ \mathrm{MW_{th}}, \qquad
+\Phi_0 = 1.5\times 10^{12}\ \mathrm{n\,cm^{-2}\,s^{-1}},
+\]
+using
+\[
+P(t) = P_0 n(t), \qquad \Phi(t) = \Phi_0 n(t).
+\]
 
-\subsection{Power and flux scaling}
+\subsection{How rod motion enters the point model}
 
-The solver evolves only the normalized neutron population. Displayed power and
-flux are then obtained from
-\begin{align}
-P(t) &= P_0\,n(t), \\
-\Phi(t) &= \Phi_0\,n(t),
-\end{align}
-with the nominal values
+The point-kinetics solver does not compute rod worth from first principles during
+runtime.  Instead it reuses the \textbf{2D diffusion-derived rod-worth table}
+frozen in \texttt{calibration.py}.  Reactivity is computed as
+\[
+\rho_{\mathrm{tot,pcm}}(x)
+= \rho_{\mathrm{clean,pcm}} + \Delta \rho_{\mathrm{rod,pcm}}(x)
++ \rho_{\mathrm{scram,pcm}},
+\]
+where $x \in [0,1]$ is rod insertion fraction.  In the current calibration:
 \begin{align*}
-P_0 &= 250\ \mathrm{MW_{th}}, \\
-\Phi_0 &= 2.4\times 10^{13}\ \mathrm{n\,cm^{-2}\,s^{-1}}.
+k_{\mathrm{clean}} &= 1.000199, \\
+\rho_{\mathrm{clean}} &= +19.9\ \mathrm{pcm}, \\
+x_{\mathrm{crit}} &\approx 0.193, \\
+\Delta \rho_{\mathrm{rod}}(1.0) &= -164.8\ \mathrm{pcm}, \\
+\rho_{\mathrm{scram}} &= -450\ \mathrm{pcm}\ \text{when latched.}
 \end{align*}
 
-So if $n(t)$ doubles, both displayed power and displayed total flux double.
+The backend interpolates linearly between 11 precomputed insertion points
+$x = 0.0, 0.1, \dots, 1.0$.
 
-\subsection{Numerical time integration}
+\subsection{Numerical method}
 
-The code does not use an explicit Euler update. Instead it uses a semi-implicit
-update to avoid instability in this stiff kinetics system.
-
-For each time step $\Delta t$, the precursor equations are written as
+The point-kinetics equations are stiff, so the backend does not use explicit
+Euler.  Instead \texttt{engine.py} uses a \textbf{semi-implicit elimination of
+the precursors}.  For each step $\Delta t$,
 \[
-C_i^{k+1} =
+C_i^{k+1}
+=
 \frac{C_i^k + \Delta t\,(\beta_i/\Lambda)\,n^{k+1}}
-{1 + \lambda_i \Delta t}.
+{1 + \lambda_i \Delta t},
 \]
+and substituting that into the neutron balance yields a stable scalar update for
+$n^{k+1}$.
 
-Substituting these into the neutron balance gives a closed equation for
-$n^{k+1}$. This is why the simulator remains stable at the chosen time step even
-for moderate positive reactivity insertions.
+The current runtime tuning is:
+\begin{center}
+\begin{tabular}{lc}
+\toprule
+Parameter & Value \\
+\midrule
+Integrator step & $0.02$ s \\
+History sampling & $0.25$ s \\
+Time scale & $8\times$ wall clock \\
+Frontend poll interval & $100$ ms \\
+Automatic SCRAM threshold & $26$ MW$_{\mathrm{th}}$ \\
+\bottomrule
+\end{tabular}
+\end{center}
 
-\section{Why these reactor dimensions were chosen}
+\section{Core page: steady 2D diffusion solution}
 
-The current \texttt{REACTOR\_MODEL} stores:
-\begin{align*}
-R_{\mathrm{in}} &= 0.8\ \mathrm{m}, \\
-R_{\mathrm{out}} &= 2.2\ \mathrm{m}, \\
-H &= 5.8\ \mathrm{m}.
-\end{align*}
+The Core page is the repository's \textbf{spatial steady-state neutronics view}.
+It reuses the same annular one-group model as the notebook and solves the 2D
+eigenvalue problem for the \emph{current rod position} taken from the Overview
+simulation.
 
-These define an \textbf{annular core} with:
+\subsection{Discretization}
+
+The implementation in \texttt{diffusion.py} and \texttt{core\_service.py} uses:
 \begin{itemize}
-  \item inner radius $R_{\mathrm{in}} = 0.8$ m,
-  \item outer radius $R_{\mathrm{out}} = 2.2$ m,
-  \item active height $H = 5.8$ m.
+  \item a cell-centered finite-difference mesh in $r$ and $z$,
+  \item harmonic averaging of diffusion coefficients at material interfaces,
+  \item sparse matrix assembly for leakage, absorption, and fission terms,
+  \item and a power-iteration style eigenvalue solve for $k_{\mathrm{eff}}$ and
+        the fundamental flux shape.
 \end{itemize}
 
-The corresponding cross-sectional area is
+The production Core page solve runs at
 \[
-A = \pi\left(R_{\mathrm{out}}^2 - R_{\mathrm{in}}^2\right)
-  = \pi(2.2^2 - 0.8^2)
-  \approx 13.19\ \mathrm{m}^2,
+\Delta r = \Delta z = 3\ \mathrm{cm},
 \]
-and the active volume is
-\[
-V = A H \approx 76.53\ \mathrm{m}^3.
-\]
+and results are cached by rod insertion state so repeated requests do not repeat
+the full eigenvalue solve.
 
-At the nominal thermal power $P_0 = 250$ MW$_{\mathrm{th}}$, this corresponds to
-an average volumetric power density of
-\[
-\frac{P_0}{V} \approx 3.27\ \mathrm{MW\,m^{-3}}.
-\]
+\subsection{What the page returns}
 
-This is a \textbf{reasonable order-of-magnitude engineering choice} for a
-low-resolution educational model: it gives a core that is neither unrealistically
-tiny nor excessively dilute.
-
-\subsection{What these dimensions do and do not mean}
-
-The dimensions were chosen to support a physically sensible interpretation:
+The backend returns:
 \begin{itemize}
-  \item an annular fuel region around a central moderator channel,
-  \item enough core height for a meaningful top-inserted control rod,
-  \item a core volume consistent with the nominal power scale.
+  \item the peak-normalized 2D flux field $\phi(r,z)$,
+  \item a radial profile through the midplane,
+  \item an axial profile through the fuel-annulus midpoint,
+  \item and metadata including $k_{\mathrm{eff}}$, mesh spacing, and iteration count.
 \end{itemize}
 
-However, in the current code these dimensions are \textbf{not used to compute}
+This is the web app's direct counterpart to the notebook's Estimate 2 flux maps.
+
+\section{Transient Diffusion page: direct time-dependent diffusion}
+
+\subsection{Why this page exists}
+
+The Overview page assumes a fixed spatial shape and evolves only an amplitude.
+The Transient Diffusion page removes that simplification and evolves the
+\textbf{spatial flux field itself}, together with the six delayed-neutron
+precursor fields.
+
+\subsection{Governing equations}
+
+The transient diffusion solver in
+\texttt{backend/reactor\_backend/transient\_diffusion.py} solves
+\begin{align}
+\frac{1}{v}\frac{\partial \phi}{\partial t}
+&=
+-L\phi
++ (1-\beta)\frac{F}{k_{\mathrm{ref}}}\phi
++ \sum_{i=1}^{6}\lambda_i C_i,
+\\
+\frac{\partial C_i}{\partial t}
+&=
+\beta_i \frac{\nu\Sigma_f}{k_{\mathrm{ref}}}\phi
+- \lambda_i C_i,
+\qquad i=1,\dots,6,
+\end{align}
+where:
 \begin{itemize}
-  \item critical buckling,
-  \item diffusion coefficients,
-  \item migration area,
-  \item geometric buckling $B_g^2$,
-  \item leakage,
-  \item rod worth from first principles.
+  \item $L$ is the spatial loss operator (leakage plus absorption),
+  \item $F$ is the diagonal fission-production operator,
+  \item $C_i(r,z,t)$ is the precursor field for group $i$,
+  \item $v = 2.2\times 10^5\ \mathrm{cm/s}$ is the one-group thermal neutron speed,
+  \item $k_{\mathrm{ref}}$ is the eigenvalue of the initialization state.
 \end{itemize}
 
-So the geometry is presently \textbf{descriptive and interpretive}, not yet
-predictive. It defines what kind of core the point model is intended to
-represent, but it is not itself closing the neutronics problem.
+The division by $k_{\mathrm{ref}}$ is deliberate: it references the transient
+fission source to the eigenvalue of the initialized state on the transient mesh.
+That keeps the transient solve anchored to the same discrete criticality
+reference and substantially reduces startup mismatch relative to using the raw
+unscaled fission operator.
 
-\section{How the control rod model was constructed}
+\subsection{Numerical method}
 
-\subsection{The implemented reactivity law}
-
-Let $x \in [0,1]$ be the rod insertion fraction, with
+The transient page uses \textbf{fully implicit Euler}.  Eliminating the
+precursors gives one sparse linear solve per time step:
 \[
-x = \frac{\text{rod insertion percent}}{100}.
-\]
-
-The code defines the cumulative rod-worth shape as
-\[
-W(x) = x - \frac{\sin(2\pi x)}{2\pi}.
-\]
-
-The total rod contribution to reactivity is then
-\[
-\rho_{\mathrm{rod}}(x) = -\rho_{\mathrm{rod,max}}\,W(x),
+A\phi^{n+1} = b,
 \]
 with
 \[
-\rho_{\mathrm{rod,max}} = 700\ \mathrm{pcm}.
+A = \frac{1}{v\Delta t}I + L
+- b_{\mathrm{eff}}\,\mathrm{diag}\!\left(\frac{\nu\Sigma_f}{k_{\mathrm{ref}}}\right),
 \]
-
-The total reactivity in pcm is
+and
 \[
-\rho_{\mathrm{tot,pcm}}(x)
+b_{\mathrm{eff}}
 =
-\rho_{\mathrm{base}}
-\rho_{\mathrm{rod}}(x)
-\rho_{\mathrm{scram}}.
+(1-\beta) + \sum_i \frac{\beta_i \lambda_i \Delta t}{1+\lambda_i \Delta t}.
 \]
-where:
-\begin{itemize}
-  \item $\rho_{\mathrm{base}}$ is chosen so that the reactor is critical at
-  50\% insertion,
-  \item $\rho_{\mathrm{scram}} = -450$ pcm when SCRAM is latched,
-  \item otherwise $\rho_{\mathrm{scram}} = 0$.
-\end{itemize}
 
-Because the critical insertion is set to $x_c = 0.5$,
+After $\phi^{n+1}$ is solved, each precursor field is updated by
 \[
-\rho_{\mathrm{base}} = \rho_{\mathrm{rod,max}}\,W(0.5).
+C_i^{n+1}
+=
+\frac{C_i^n + \Delta t\,\beta_i(\nu\Sigma_f/k_{\mathrm{ref}})\phi^{n+1}}
+{1+\lambda_i \Delta t}.
 \]
-Since $W(0.5) = 0.5$, this gives
+
+This scheme is unconditionally stable for the linear model and is much better
+suited than explicit Euler to delayed-neutron reactor kinetics.
+
+\subsection{Runtime settings}
+
+To keep the direct transient responsive in a browser-driven local app, the
+production solver uses:
+
+\begin{center}
+\begin{tabular}{lc}
+\toprule
+Parameter & Value \\
+\midrule
+Transient mesh & $\Delta r = \Delta z = 5$ cm \\
+Time step & $\Delta t = 1$ s \\
+Display heatmap & $40 \times 60$ points \\
+History limit & 200 points \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The transient mesh is intentionally coarser than the Core page mesh so the LU
+factorization can be rebuilt quickly whenever rod insertion changes.
+
+\subsection{Power normalization}
+
+The transient diffusion page no longer assumes that power is proportional to one
+global amplitude alone.  Instead it evaluates the cylindrical fission-rate
+integral
 \[
-\rho_{\mathrm{base}} = 350\ \mathrm{pcm}.
+P \propto \sum_j \nu\Sigma_{f,j}\,\phi_j\,V_j,
+\qquad
+V_j \propto r_j \Delta r \Delta z,
 \]
-
-Therefore:
-\begin{itemize}
-  \item at 50\% insertion, the core is nominally critical,
-  \item withdrawing rods below 50\% adds positive reactivity,
-  \item inserting rods above 50\% adds negative reactivity.
-\end{itemize}
-
-\subsection{Why this function is physically plausible}
-
-The key observation is that
+and reports
 \[
-\frac{dW}{dx} = 1 - \cos(2\pi x) = 2\sin^2(\pi x).
+\frac{P}{P_0}
+=
+\frac{\sum_j \nu\Sigma_{f,j}\phi_j V_j}
+{\sum_j \nu\Sigma_{f,j}\phi_{j,0} V_j}.
 \]
 
-So the \emph{differential} rod worth is proportional to
-\[
-\sin^2(\pi x).
-\]
+The factor $2\pi$ cancels in the ratio, so the implementation only needs the
+$r_j \Delta r \Delta z$ weight per cell.
 
-That is exactly the kind of shape one gets if:
+\section{How the three app pages relate}
+
+\begin{center}
+\begin{tabular}{p{2.7cm}p{4.0cm}p{6.0cm}}
+\toprule
+Layer & Model & Purpose \\
+\midrule
+Notebook estimate 1 & Homogeneous buckling & First-pass analytical check of size and leakage trends \\
+Notebook estimate 2 / Core page & Steady 2D one-group diffusion & Compute $k_{\mathrm{eff}}$, flux maps, and rod-worth calibration \\
+Overview page & 0D six-group point kinetics & Fast transient driven by the notebook-derived reactivity curve \\
+Transient Diffusion page & 2D diffusion + 6 precursor fields & Spatial transient with evolving flux shape and power \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The conceptual workflow is therefore:
 \begin{enumerate}
-  \item the core is dominated by the fundamental axial mode,
-  \item the axial neutron flux is approximated by
-  \[
-  \phi(z) \propto \sin\left(\frac{\pi z}{H}\right),
-  \]
-  \item local control rod effectiveness is proportional to the local importance
-  or, in a crude approximation, to $\phi(z)^2$.
+  \item derive or justify effective constants in the notebook,
+  \item solve the steady annular diffusion problem and calibrate rod worth,
+  \item freeze those results into backend constants,
+  \item use the fast point model for dashboard-style operation,
+  \item and use the diffusion transient when spatial dynamics matter.
 \end{enumerate}
 
-Under those assumptions, the differential rod worth is largest near the axial
-midplane and smallest near the top and bottom ends. Integrating that axial
-weighting from the top of the core to insertion depth $z$ gives precisely a
-cumulative function of the form
-\[
-W(x) = \int_0^x 2\sin^2(\pi u)\,du
-     = x - \frac{\sin(2\pi x)}{2\pi}.
-\]
+\section{Important assumptions and limitations}
 
-\subsection{So: was one-group diffusion used?}
-
-\textbf{Not as a solved reactor model.} The code does \emph{not} solve the
-one-group diffusion equation
-\[
--D \nabla^2 \phi + \Sigma_a \phi = \frac{1}{k}\nu\Sigma_f \phi
-\]
-for this annular geometry, and it does not compute rod worth by perturbing a
-diffusion eigenvalue.
-
-But \textbf{yes, the rod-worth shape is motivated by the fundamental mode logic}
-that one would get from one-group diffusion in the axial direction. More
-precisely:
+The current model remains intentionally simplified:
 \begin{itemize}
-  \item the current model \emph{borrows the shape} of a diffusion-theory
-  fundamental mode,
-  \item but it \emph{does not perform} a diffusion-theory criticality or rod-worth
-  calculation.
+  \item one energy group only,
+  \item no thermal-hydraulic feedback,
+  \item no fuel temperature, moderator temperature, void, xenon, or burnup effects,
+  \item homogenized fuel and rod regions,
+  \item heavy-water moderation is represented through effective diffusion and
+        absorption constants rather than coupled moderator state equations.
 \end{itemize}
 
-That makes the current rod model a \textbf{physics-inspired ansatz}, not a
-first-principles diffusion result.
-
-\section{Heavy-water interpretation}
-
-The code labels the core as heavy-water moderated, but heavy water does not yet
-appear through explicit moderator equations. In the current model, this means:
-\begin{itemize}
-  \item the reactor is intended to be interpreted as a thermalized, D$_2$O
-  moderated system,
-  \item the annular geometry with a central low-absorption moderator region is
-  meant to be qualitatively consistent with that picture,
-  \item the delayed-neutron and kinetics constants are still generic thermal
-  reactor values rather than a calibrated CANDU-style lattice data set.
-\end{itemize}
-
-So ``heavy-water moderated'' is presently a \textbf{modeling context}, not yet a
-material-property calculation.
-
-\section{What is heuristic and what is derived}
-
-\subsection{Reasonably physics-based pieces}
-
-\begin{itemize}
-  \item Standard six-group point kinetics equations.
-  \item Standard interpretation of reactivity in $\Delta k/k$.
-  \item A rod differential worth proportional to a fundamental-mode
-  $\sin^2$ weighting.
-  \item Power and flux proportional to neutron population amplitude.
-\end{itemize}
-
-\subsection{Heuristic or tuned pieces}
-
-\begin{itemize}
-  \item The actual annular dimensions are engineering choices, not diffusion-derived.
-  \item The total rod worth of 700 pcm is a tuning choice.
-  \item The extra SCRAM penalty of 450 pcm is a tuning choice to ensure shutdown margin.
-  \item The nominal power and nominal flux are scale-setting choices.
-  \item The model does not yet include temperature, void, xenon, or burnup feedbacks.
-\end{itemize}
-
-\section{How to make the model more rigorous}
-
-If a more physics-grounded reactor model is desired, the next upgrade would be:
-
-\begin{enumerate}
-  \item Choose a specific reactor type and fuel/moderator composition.
-  \item Solve a one-group or multi-group diffusion eigenvalue problem in the
-  annular geometry to obtain the spatial flux shape and $k_{\mathrm{eff}}$.
-  \item Derive geometric buckling from the actual dimensions.
-  \item Compute control rod worth from perturbation theory or repeated
-  eigenvalue solves with varying insertion depth.
-  \item Derive $\beta_{\mathrm{eff}}$, $\Lambda$, and nominal flux/power from a
-  consistent lattice/core model.
-  \item Only then reduce that spatial model to a calibrated point-kinetics surrogate.
-\end{enumerate}
+So the repository should be read as an \textbf{educational reactor simulator with
+increasing levels of neutronics fidelity}, not as a licensing-grade core code.
 
 \section{Bottom line}
 
-The current simulator is best described as:
+\texttt{reactorModel.ipynb} is the repository's physics workbench: it derives the
+effective one-group annular-core picture, performs the 2D criticality and
+rod-worth studies, and defines the constants later frozen into the backend.
 
-\begin{quote}
-A point-kinetics reactor transient model with six delayed neutron groups, a
-heuristically scaled annular heavy-water-reactor geometry, and a control rod
-worth curve chosen to mimic the axial fundamental-mode weighting suggested by
-one-group diffusion theory.
-\end{quote}
+The web app then uses that physics in two ways:
+\begin{itemize}
+  \item as a reduced \textbf{point-kinetics transient} for fast control-response
+        exploration on the Overview page,
+  \item and as a direct \textbf{diffusion-based spatial solve}, first in steady
+        form on the Core page and then in time-dependent form on the Transient
+        Diffusion page.
+\end{itemize}
 
-That is physically interpretable and useful for an educational transient model,
-but it is not yet a full spatial reactor calculation.
+That is the current modeling hierarchy of the project.
 
 \end{document}
