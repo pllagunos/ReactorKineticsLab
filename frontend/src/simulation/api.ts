@@ -1,4 +1,4 @@
-import type { SimulationState } from './types'
+import type { SimulationState, CoreFluxResponse } from './types'
 
 const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL ?? '/api').replace(/\/$/, '')
 
@@ -39,5 +39,8 @@ export const simulationApi = {
       method: 'POST',
       body: JSON.stringify({ running }),
     })
+  },
+  getCoreFlux() {
+    return request<CoreFluxResponse>('/core/flux')
   },
 }

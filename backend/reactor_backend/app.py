@@ -1,8 +1,9 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from .schemas import RodInsertionRequest, RunningRequest, SimulationState
+from .schemas import RodInsertionRequest, RunningRequest, SimulationState, CoreFluxResponse
 from .service import simulation_service
+from .core_service import get_core_flux
 
 
 app = FastAPI(title="Reactor simulator backend")
@@ -49,3 +50,14 @@ def set_rod_insertion(payload: RodInsertionRequest) -> SimulationState:
 @app.post("/api/simulation/running", response_model=SimulationState)
 def set_running(payload: RunningRequest) -> SimulationState:
     return simulation_service.set_running(payload.running)
+
+
+@app.get("/api/core/flux", response_model=CoreFluxResponse)
+def get_core_flux_endpoint() -> CoreFluxResponse:
+    """Return 2D flux distribution for the current rod insertion state.
+
+    Results are cached per insertion fraction so repeated calls do not
+    re-run the eigenvalue solve.
+    """
+    rod_pct = simulation_service.get_state().snapshot.rodInsertionPercent
+    return get_core_flux(rod_pct)

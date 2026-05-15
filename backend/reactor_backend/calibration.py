@@ -55,3 +55,22 @@ ROD_WORTH_DELTA_RHO_PCM: tuple[float, ...] = (
 FULL_INSERTION_ROD_WORTH_PCM: float = 159.6
 CRITICAL_INSERTION_PERCENT: float = 32.0
 FULL_INSERTION_TOTAL_PCM: float = -120.2
+
+# ---------------------------------------------------------------------------
+# One-group material constants for the 2D r-z diffusion model
+# ---------------------------------------------------------------------------
+# Inner D2O moderator channel (pure heavy water, slightly spectrum-averaged)
+D_MOD_INNER_CM: float = 1.25
+SIGMA_A_MOD_INNER_CM_INV: float = 3.5e-4
+
+# Homogenised fuel annulus: natural uranium rods + D2O moderator lattice.
+# Fuel volume fraction v_f ≈ 1.77 %; Sigma_a inflated ~3× by resonance
+# absorption relative to the 2200 m/s thermal-point macroscopic value.
+D_FUEL_CM: float = 0.95
+SIGMA_A_FUEL_CM_INV: float = 8.5e-3
+NU_SIGMA_F_FUEL_CM_INV: float = 8.59e-3
+
+# Outer D2O reflector (marginally higher temperature + trace impurities
+# raise Sigma_a slightly above the inner moderator value)
+D_REFL_CM: float = 1.15
+SIGMA_A_REFL_CM_INV: float = 4.0e-4

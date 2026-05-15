@@ -68,3 +68,43 @@ export type SimulationState = {
   snapshot: ReactorSnapshot
   tuning: SimulationTuning
 }
+
+// ---------------------------------------------------------------------------
+// Core page — diffusion flux response
+// ---------------------------------------------------------------------------
+
+export type CoreFluxGeometry = {
+  rInnerCm: number
+  rFuelCm: number
+  rReflCm: number
+  hActiveCm: number
+  hReflCm: number
+  rodRadiusCm: number
+}
+
+export type CoreFluxProfile = {
+  axisCm: number[]
+  phiNorm: number[]
+}
+
+export type CoreFluxMetadata = {
+  rodInsertionPercent: number
+  kEff: number
+  iterations: number
+  cached: boolean
+  meshDrCm: number
+  meshDzCm: number
+  displayNr: number
+  displayNz: number
+}
+
+export type CoreFluxResponse = {
+  heatmapRCm: number[]
+  heatmapZCm: number[]
+  /** heatmapPhi[i][j] = normalised flux at (r_i, z_j) in [0, 1] */
+  heatmapPhi: number[][]
+  radial: CoreFluxProfile
+  axial: CoreFluxProfile
+  geometry: CoreFluxGeometry
+  metadata: CoreFluxMetadata
+}

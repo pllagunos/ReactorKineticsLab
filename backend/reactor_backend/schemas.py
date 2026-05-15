@@ -77,3 +77,49 @@ class RodInsertionRequest(BaseModel):
 
 class RunningRequest(BaseModel):
     running: bool
+
+
+# ---------------------------------------------------------------------------
+# Core page — diffusion flux response
+# ---------------------------------------------------------------------------
+
+
+class CoreFluxGeometry(BaseModel):
+    rInnerCm: float
+    rFuelCm: float
+    rReflCm: float
+    hActiveCm: float
+    hReflCm: float
+    rodRadiusCm: float
+
+
+class CoreFluxProfile(BaseModel):
+    axisCm: list[float]
+    phiNorm: list[float]
+
+
+class CoreFluxMetadata(BaseModel):
+    rodInsertionPercent: float
+    kEff: float
+    iterations: int
+    cached: bool
+    meshDrCm: float
+    meshDzCm: float
+    displayNr: int
+    displayNz: int
+
+
+class CoreFluxResponse(BaseModel):
+    """2D flux heatmap + midplane profiles from the diffusion solver.
+
+    heatmapRCm / heatmapZCm are the display-grid coordinates (cm).
+    heatmapPhi[i][j] is the normalised flux at (r_i, z_j), in [0, 1].
+    """
+
+    heatmapRCm: list[float]
+    heatmapZCm: list[float]
+    heatmapPhi: list[list[float]]
+    radial: CoreFluxProfile
+    axial: CoreFluxProfile
+    geometry: CoreFluxGeometry
+    metadata: CoreFluxMetadata
