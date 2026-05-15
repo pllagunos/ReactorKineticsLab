@@ -123,3 +123,39 @@ class CoreFluxResponse(BaseModel):
     axial: CoreFluxProfile
     geometry: CoreFluxGeometry
     metadata: CoreFluxMetadata
+
+
+# ---------------------------------------------------------------------------
+# Transient diffusion page
+# ---------------------------------------------------------------------------
+
+
+class TransientHistoryPoint(BaseModel):
+    timeSeconds: float
+    reactivityPcm: float
+    powerNorm: float
+
+
+class TransientDiffusionState(BaseModel):
+    """Full state payload for the transient diffusion page.
+
+    heatmapPhi[i][j] is the peak-normalised flux at (r_i, z_j) in [0, 1].
+    powerNorm = P/P_0 (ratio of current to initial fission rate, volume-weighted).
+    """
+
+    timeSeconds: float
+    rodInsertionPercent: float
+    running: bool
+    reactivityPcm: float
+    powerNorm: float
+    heatmapRCm: list[float]
+    heatmapZCm: list[float]
+    heatmapPhi: list[list[float]]
+    radial: CoreFluxProfile
+    axial: CoreFluxProfile
+    history: list[TransientHistoryPoint]
+    geometry: CoreFluxGeometry
+    dt: float
+    meshDrCm: float
+    meshDzCm: float
+    stepCount: int

@@ -19,6 +19,12 @@ export function NavBar() {
             Core
           </NavLink>
           <NavLink
+            to="/transient"
+            className={({ isActive }) => `nav-link${isActive ? ' nav-link--active' : ''}`}
+          >
+            Transient
+          </NavLink>
+          <NavLink
             to="/thermal-hydraulics"
             className={({ isActive }) => `nav-link${isActive ? ' nav-link--active' : ''}`}
           >

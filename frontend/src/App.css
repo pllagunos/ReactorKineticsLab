@@ -607,3 +607,76 @@ input[type='range'] {
   0% { background-position: 200% 0; }
   100% { background-position: -200% 0; }
 }
+
+/* ---------------------------------------------------------------------------
+   Transient diffusion page
+   --------------------------------------------------------------------------- */
+
+.transient-status-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.2rem 2rem;
+  margin-top: 1.2rem;
+  padding: 0.9rem 1.1rem;
+  border-radius: 0.6rem;
+  background: rgba(15, 23, 42, 0.45);
+  border: 1px solid rgba(148, 163, 184, 0.1);
+}
+
+.transient-metric {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-width: 90px;
+}
+
+.transient-metric__label {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+}
+
+.transient-metric__value {
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: var(--text-strong);
+  font-variant-numeric: tabular-nums;
+}
+
+.transient-buttons {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.transient-rod-control {
+  margin-top: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.rod-slider-track {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.rod-slider-cap {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.rod-slider {
+  flex: 1;
+  accent-color: #38bdf8;
+  cursor: pointer;
+}
+
+.rod-slider:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}

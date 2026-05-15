@@ -1,9 +1,16 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from .schemas import RodInsertionRequest, RunningRequest, SimulationState, CoreFluxResponse
+from .schemas import (
+    RodInsertionRequest,
+    RunningRequest,
+    SimulationState,
+    CoreFluxResponse,
+    TransientDiffusionState,
+)
 from .service import simulation_service
 from .core_service import get_core_flux
+from .transient_service import transient_diffusion_service
 
 
 app = FastAPI(title="Reactor simulator backend")
@@ -61,3 +68,36 @@ def get_core_flux_endpoint() -> CoreFluxResponse:
     """
     rod_pct = simulation_service.get_state().snapshot.rodInsertionPercent
     return get_core_flux(rod_pct)
+
+
+# ---------------------------------------------------------------------------
+# Transient diffusion page
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/transient-diffusion/state", response_model=TransientDiffusionState)
+def get_transient_state() -> TransientDiffusionState:
+    """Return current transient diffusion state, advancing if running."""
+    return transient_diffusion_service.get_state()
+
+
+@app.post("/api/transient-diffusion/reset", response_model=TransientDiffusionState)
+def reset_transient() -> TransientDiffusionState:
+    """Reset transient to the critical steady state."""
+    return transient_diffusion_service.reset()
+
+
+@app.post("/api/transient-diffusion/running", response_model=TransientDiffusionState)
+def set_transient_running(payload: RunningRequest) -> TransientDiffusionState:
+    return transient_diffusion_service.set_running(payload.running)
+
+
+@app.post("/api/transient-diffusion/rod-insertion", response_model=TransientDiffusionState)
+def set_transient_rod(payload: RodInsertionRequest) -> TransientDiffusionState:
+    return transient_diffusion_service.set_rod_insertion(payload.insertionPercent)
+
+
+@app.post("/api/transient-diffusion/step", response_model=TransientDiffusionState)
+def manual_transient_step() -> TransientDiffusionState:
+    """Advance the transient by exactly one time step."""
+    return transient_diffusion_service.manual_step()

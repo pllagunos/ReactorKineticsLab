@@ -108,3 +108,33 @@ export type CoreFluxResponse = {
   geometry: CoreFluxGeometry
   metadata: CoreFluxMetadata
 }
+
+// ---------------------------------------------------------------------------
+// Transient diffusion page
+// ---------------------------------------------------------------------------
+
+export type TransientHistoryPoint = {
+  timeSeconds: number
+  reactivityPcm: number
+  powerNorm: number
+}
+
+export type TransientDiffusionState = {
+  timeSeconds: number
+  rodInsertionPercent: number
+  running: boolean
+  reactivityPcm: number
+  powerNorm: number
+  heatmapRCm: number[]
+  heatmapZCm: number[]
+  /** heatmapPhi[i][j] = peak-normalised flux at (r_i, z_j) in [0, 1] */
+  heatmapPhi: number[][]
+  radial: CoreFluxProfile
+  axial: CoreFluxProfile
+  history: TransientHistoryPoint[]
+  geometry: CoreFluxGeometry
+  dt: number
+  meshDrCm: number
+  meshDzCm: number
+  stepCount: number
+}
