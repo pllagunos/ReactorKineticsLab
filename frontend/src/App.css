@@ -1,3 +1,126 @@
+/* ── Navigation ─────────────────────────────────────────── */
+
+.nav-bar {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  width: 100%;
+  background: rgba(2, 6, 23, 0.92);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-bottom: 1px solid rgba(148, 163, 184, 0.14);
+}
+
+.nav-bar__inner {
+  width: min(1340px, calc(100% - 2rem));
+  margin: 0 auto;
+  height: 3.25rem;
+  display: flex;
+  align-items: center;
+  gap: 2.5rem;
+}
+
+.nav-bar__brand {
+  font-weight: 600;
+  font-size: 0.95rem;
+  color: var(--text-strong);
+  letter-spacing: 0.02em;
+  flex-shrink: 0;
+}
+
+.nav-bar__links {
+  display: flex;
+  gap: 0.25rem;
+}
+
+.nav-link {
+  color: var(--text-dim);
+  text-decoration: none;
+  font-size: 0.92rem;
+  padding: 0.35rem 0.75rem;
+  border-radius: 0.5rem;
+  transition:
+    color 130ms ease,
+    background 130ms ease;
+}
+
+.nav-link:hover {
+  color: var(--text-muted);
+  background: rgba(148, 163, 184, 0.08);
+}
+
+.nav-link--active {
+  color: var(--text-strong);
+  background: rgba(125, 211, 252, 0.1);
+}
+
+/* ── Page content shell ─────────────────────────────────── */
+
+.page-content {
+  width: min(1340px, calc(100% - 2rem));
+  margin: 0 auto;
+  padding: 1.5rem 0 2rem;
+}
+
+/* ── Core page flux visuals ─────────────────────────────── */
+
+.core-flux-panel {
+  padding: 1.5rem;
+}
+
+.flux-heatmap-svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: 0.6rem;
+  overflow: hidden;
+}
+
+.flux-label {
+  fill: rgba(148, 163, 184, 0.7);
+  font-size: 9px;
+  letter-spacing: 0.06em;
+}
+
+.flux-colorbar-legend {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+  font-size: 0.82rem;
+  color: var(--text-dim);
+}
+
+.flux-colorbar {
+  flex: 1;
+  height: 10px;
+  border-radius: 999px;
+  background: linear-gradient(
+    to right,
+    rgb(2, 10, 35),
+    rgb(12, 74, 110),
+    rgb(8, 145, 178),
+    rgb(245, 158, 11),
+    rgb(254, 243, 199)
+  );
+}
+
+.core-profiles-grid {
+  display: grid;
+  gap: 1.5rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.core-profile-card {
+  padding: 1.25rem;
+}
+
+.profile-svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
 .app-shell {
   display: grid;
   gap: 1.5rem;
