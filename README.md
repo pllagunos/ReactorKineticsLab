@@ -41,7 +41,7 @@ That gives the project:
 ### Install frontend dependencies
 
 ```bash
-bun install
+bun run frontend:install
 ```
 
 ### Create the backend environment with UV
@@ -82,7 +82,7 @@ curl http://127.0.0.1:8000/api/health
 
 ## Frontend
 
-The frontend remains a **Bun-managed React + TypeScript** app.
+The frontend remains a **Bun-managed React + TypeScript** app in `frontend/`.
 
 Its job is to:
 
@@ -93,13 +93,13 @@ Its job is to:
 
 Key frontend files:
 
-- `src/App.tsx`
+- `frontend/src/App.tsx`
   - dashboard composition and control wiring
-- `src/hooks/useReactorSimulation.ts`
+- `frontend/src/hooks/useReactorSimulation.ts`
   - API polling, command calls, and React state integration
-- `src/simulation/api.ts`
+- `frontend/src/simulation/api.ts`
   - frontend API client for the Python service
-- `src/components/`
+- `frontend/src/components/`
   - schematic, charts, and metric cards
 
 Vite proxies `/api` requests to the Python backend during development.
