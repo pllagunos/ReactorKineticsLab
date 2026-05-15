@@ -251,7 +251,6 @@ Intentional simplifications:
 
 Now that the physics layer is in Python, natural next steps are:
 
-- include one group diffusion results from analytical python done
 - maybe solve time dependent diffusion equation instead of point kinetics?
   - add subpage where this is done, with visualization of 2D axial and radial fluxes from inspo folder
 - integrate Modelica FMU for simple systems thermal hydraulics
