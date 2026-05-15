@@ -4,16 +4,6 @@ A localhost reactor simulator with a **React + Bun frontend** and a **Python bac
 
 The current version models a simplified **heavy-water-moderated annular core** with one operator control: **control rod insertion**. The browser dashboard shows how **reactivity**, **total neutron flux**, and **thermal power** evolve over time, while the transient is solved in Python.
 
-## Why the project is hybrid
-
-The project started as a Bun-managed React app with an in-browser solver. It now uses a hybrid architecture so the **simulation core can move into the Python scientific ecosystem** without losing the existing frontend.
-
-That gives the project:
-
-- a rich local browser UI
-- a Python code path for future numerical work
-- a cleaner separation between **physics** and **presentation**
-
 ## What the app does
 
 - lets you move a **single control rod bank** from fully withdrawn to fully inserted
@@ -41,7 +31,7 @@ That gives the project:
 ### Install frontend dependencies
 
 ```bash
-bun run frontend:install
+bun install
 ```
 
 ### Create the backend environment with UV
@@ -65,13 +55,6 @@ That launches:
 
 Open `http://127.0.0.1:5173`.
 
-### Other useful commands
-
-```bash
-bun run build
-bun run lint
-```
-
 ### Quick backend check
 
 ```bash
@@ -82,7 +65,7 @@ curl http://127.0.0.1:8000/api/health
 
 ## Frontend
 
-The frontend remains a **Bun-managed React + TypeScript** app in `frontend/`.
+The frontend is a **Bun-managed React + TypeScript** app.
 
 Its job is to:
 
@@ -268,17 +251,7 @@ Intentional simplifications:
 
 Now that the physics layer is in Python, natural next steps are:
 
-- include one group diffusion results from analytical python
+- include one group diffusion results from analytical python done
 - maybe solve time dependent diffusion equation instead of point kinetics?
-- visualization of axial and radial flux distribution (inspiration form inspo folder)
+  - add subpage where this is done, with visualization of 2D axial and radial fluxes from inspo folder
 - integrate Modelica FMU for simple systems thermal hydraulics
-
-
-FIXES NOTEBOOK:
-- how were the dimensions for the estimate 2 baseline model decided
-- remove the radial only approach and instead find geometry using 2D r-z diffusion solver
-- For the 2D approach we should get dimensions that make the reactor slightly overcritical. Perhaps iteration like in a gridsearch (idea from ML) or what method would you recommend to be able to get a geometry that gives k = 1.0000
-- same question but for control rod, to get proper negative pcm?
-- restructure folders. src (which is just frontend) to be renamed to frontend and bundled together with the bun, eslint, package, vite and tsconfig files. backend, which has the core python backend and physics solvers to be renamed approprietly (reactor-app?)
-- python general solver for diffusion that can be used by both notebook and backend
-- in reactorModel.ipynb use these diffusion solvers for the numerical calculations, instead of defining the solvers inside the notebook
