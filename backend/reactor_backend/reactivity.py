@@ -1,4 +1,4 @@
-from .calibration import ROD_WORTH_DELTA_RHO_PCM, ROD_WORTH_X
+from .calibration import CLEAN_CORE_BASE_EXCESS_PCM, ROD_WORTH_DELTA_RHO_PCM, ROD_WORTH_X
 from .config import REACTOR_MODEL
 from .schemas import ReactivitySnapshot
 
@@ -30,17 +30,17 @@ def compute_reactivity(
 ) -> ReactivitySnapshot:
     """Compute reactor reactivity from rod position.
 
-    The clean unrodded core (0 % insertion) is the critical reference.
-    Rod insertion adds only negative worth; the full-bank worth is ~−29 pcm.
+    The clean unrodded core carries a small positive excess reactivity.
+    Rod insertion contributes negative worth from the 2D-calibrated table.
     """
     clamped_insertion_percent = clamp_insertion_percent(rod_insertion_percent)
     x = clamped_insertion_percent / 100.0
     rod_contribution_pcm = _interpolate_rod_worth(x)
     scram_penalty_pcm = -REACTOR_MODEL.scram_shutdown_pcm if scram_latched else 0.0
-    total_pcm = rod_contribution_pcm + scram_penalty_pcm
+    total_pcm = CLEAN_CORE_BASE_EXCESS_PCM + rod_contribution_pcm + scram_penalty_pcm
 
     return ReactivitySnapshot(
-        baseExcessPcm=0.0,
+        baseExcessPcm=CLEAN_CORE_BASE_EXCESS_PCM,
         dollars=total_pcm / REACTOR_MODEL.beta_effective_pcm,
         rodContributionPcm=rod_contribution_pcm,
         rodInsertionPercent=clamped_insertion_percent,

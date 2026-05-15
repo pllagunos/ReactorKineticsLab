@@ -230,7 +230,7 @@ function App() {
         <section className="trends-column">
           <LineChart
             title="Reactivity trend"
-            subtitle="Rod insertion adds negative reactivity (2D-calibrated worth). Unrodded core is the critical reference."
+            subtitle="Unrodded core has a small positive excess; this 2D-calibrated combined bank crosses critical near 32% insertion."
             color="#f59e0b"
             data={history}
             valueAccessor={(point) => point.reactivityPcm}
@@ -261,7 +261,7 @@ function App() {
           <h2>What this version includes</h2>
           <ul className="note-list">
             <li>One annular core with a fixed heavy-water moderation assumption.</li>
-            <li>One operator-controlled rod bank with a rod-worth curve derived from the 2D r-z diffusion solver (full-bank worth ≈ 29 pcm).</li>
+            <li>One combined control/shutdown bank with a 2D r-z derived worth curve (full-bank worth ≈ 160 pcm).</li>
             <li>
               Six delayed neutron groups solved in the Python backend with a
               stable implicit integration step.
@@ -273,7 +273,7 @@ function App() {
           <p className="section-label">Observables</p>
           <h2>How to read the dashboard</h2>
           <ul className="note-list">
-            <li>Positive reactivity is possible only transiently (e.g. near 0–10 % insertion where the 2D mesh shows a small artefact); normal rod insertion drives the core subcritical.</li>
+            <li>With rods fully withdrawn the modeled clean core is slightly supercritical; insertion through ~32% drives the core to critical and deeper insertion makes it subcritical.</li>
             <li>Flux and power scale from nominal operating conditions.</li>
             <li>
               The simulated clock can run faster than wall time so short transients

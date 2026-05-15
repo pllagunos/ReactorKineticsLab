@@ -164,22 +164,29 @@ The only operator input is **rod insertion percent**.
 
 Rod position is converted into reactivity using a **2D-calibrated rod-worth table** derived from `theory/reactorModel.ipynb`:
 
-- The clean, unrodded core is the **critical reference** (0 % insertion → ρ = 0 pcm).
-- The table stores Δρ(x) at 11 points (x = 0.0 to 1.0 in steps of 0.1) from a 2D r-z finite-difference one-group diffusion eigenvalue scan.
+- The clean, unrodded core is slightly supercritical in the 2D solve: `k_eff ≈ 1.000395` (`ρ ≈ +39.4 pcm`).
+- The table stores **rod-only** `Δρ(x)` at 11 points (x = 0.0 to 1.0 in steps of 0.1) from a 2D r-z finite-difference one-group diffusion eigenvalue scan.
 - Backend interpolation is linear between table points.
-- Rod insertion adds only **negative reactivity**; the full-bank worth is ≈ **−29 pcm**.
+- Total reactivity is computed as `ρ_total(x) = ρ_base(clean) + Δρ_rod(x) + ρ_scram`.
+- The rod is modeled as a **combined control/shutdown bank** with effective parameters:
+  - equivalent radius `r_rod = 50 cm`
+  - effective absorber increment `ΔΣ_a,max = 0.25 cm⁻¹` (one-group homogenized value)
 
 Current calibration values (frozen from the notebook):
 
 | x (insertion fraction) | Δρ (pcm) |
 |---|---|
 | 0.0 | 0.0 (reference) |
-| 0.1 | +0.6 (mesh artefact) |
-| 0.2 | −0.9 |
-| 0.5 | −13.4 |
-| 1.0 | −29.0 |
+| 0.1 | −4.7 |
+| 0.2 | −16.3 |
+| 0.5 | −84.7 |
+| 1.0 | −159.6 |
 
-Extra SCRAM shutdown margin: **450 pcm**
+Derived operating points:
+
+- critical insertion: **~32%**
+- full insertion total reactivity: **~−120 pcm** (without extra SCRAM penalty)
+- extra SCRAM shutdown margin (latched trip): **450 pcm**
 
 The dashboard shows reactivity in **pcm**, while the kinetics solver uses **delta-k/k** internally:
 
@@ -275,4 +282,3 @@ FIXES NOTEBOOK:
 - restructure folders. src (which is just frontend) to be renamed to frontend and bundled together with the bun, eslint, package, vite and tsconfig files. backend, which has the core python backend and physics solvers to be renamed approprietly (reactor-app?)
 - python general solver for diffusion that can be used by both notebook and backend
 - in reactorModel.ipynb use these diffusion solvers for the numerical calculations, instead of defining the solvers inside the notebook
-

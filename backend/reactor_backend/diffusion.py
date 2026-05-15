@@ -447,6 +447,168 @@ def rho_pcm(k: float) -> float:
     return (k - 1.0) / k * 1e5
 
 
+def estimate_critical_insertion(
+    x_values: np.ndarray | list[float], rho_total_pcm: np.ndarray | list[float]
+) -> float | None:
+    """Estimate insertion fraction where total reactivity crosses zero.
+
+    Uses linear interpolation between neighboring points of opposite sign.
+    Returns ``None`` if no zero crossing is bracketed.
+    """
+    x_arr = np.asarray(x_values, dtype=float).reshape(-1)
+    rho_arr = np.asarray(rho_total_pcm, dtype=float).reshape(-1)
+    if x_arr.size != rho_arr.size:
+        raise ValueError("x_values and rho_total_pcm must have the same length")
+    if x_arr.size < 2:
+        return None
+
+    for i in range(x_arr.size - 1):
+        x0, x1 = x_arr[i], x_arr[i + 1]
+        y0, y1 = rho_arr[i], rho_arr[i + 1]
+        if y0 == 0.0:
+            return float(x0)
+        if y0 * y1 <= 0.0 and y1 != y0:
+            return float(x0 + (0.0 - y0) * (x1 - x0) / (y1 - y0))
+    if rho_arr[-1] == 0.0:
+        return float(x_arr[-1])
+    return None
+
+
+def scan_rod_worth_2d(
+    model: Model2D,
+    x_values: np.ndarray | list[float] | None = None,
+    dr: float = 3.0,
+    dz: float = 3.0,
+    max_iter: int = 300,
+    tol: float = 1e-6,
+    warm_start: bool = True,
+) -> dict:
+    """Evaluate 2D rod worth over insertion fractions.
+
+    Returns arrays for k_eff, total reactivity, and rod worth relative to the
+    clean unrodded state (x=0), plus an interpolated critical insertion point.
+    """
+    if x_values is None:
+        x_arr = np.linspace(0.0, 1.0, 11)
+    else:
+        x_arr = np.asarray(x_values, dtype=float).reshape(-1)
+    if x_arr.size == 0:
+        raise ValueError("x_values must not be empty")
+    if np.any((x_arr < 0.0) | (x_arr > 1.0)):
+        raise ValueError("x_values must lie in [0, 1]")
+
+    clean_sol = solve_2d(
+        model,
+        dr=dr,
+        dz=dz,
+        x_insert=0.0,
+        max_iter=max_iter,
+        tol=tol,
+    )
+    rho_clean = rho_pcm(clean_sol["k_eff"])
+    phi_ws = clean_sol["phi"] if warm_start else None
+
+    k_values = np.zeros(x_arr.size, dtype=float)
+    rho_total = np.zeros(x_arr.size, dtype=float)
+    iterations: list[int] = []
+
+    for i, x_insert in enumerate(x_arr):
+        sol = solve_2d(
+            model,
+            dr=dr,
+            dz=dz,
+            x_insert=float(x_insert),
+            phi0=phi_ws,
+            max_iter=max_iter,
+            tol=tol,
+        )
+        if warm_start:
+            phi_ws = sol["phi"]
+        k_values[i] = sol["k_eff"]
+        rho_total[i] = rho_pcm(sol["k_eff"])
+        iterations.append(int(sol["iterations"]))
+
+    delta_rho = rho_total - rho_clean
+    x_critical = estimate_critical_insertion(x_arr, rho_total)
+
+    return {
+        "x_insert": x_arr,
+        "k_eff": k_values,
+        "rho_total_pcm": rho_total,
+        "delta_rho_pcm": delta_rho,
+        "rho_clean_pcm": float(rho_clean),
+        "k_clean": float(clean_sol["k_eff"]),
+        "critical_insertion_fraction": x_critical,
+        "iterations": iterations,
+    }
+
+
+def sweep_shutdown_bank_design_2d(
+    template: Model2D,
+    rod_radii_cm: np.ndarray | list[float],
+    delta_sigma_a_cm_inv: np.ndarray | list[float],
+    target_full_total_pcm: tuple[float, float] = (-150.0, -100.0),
+    dr: float = 5.0,
+    dz: float = 5.0,
+    max_iter: int = 250,
+    tol: float = 1e-5,
+) -> list[dict]:
+    """Sweep rod geometry/absorber parameters against shutdown-margin target.
+
+    The template geometry and material regions are fixed; only ``r_rod`` and
+    ``dSa_rod`` are varied.  Results are sorted with in-target designs first.
+    """
+    radii = np.asarray(rod_radii_cm, dtype=float).reshape(-1)
+    dsa_values = np.asarray(delta_sigma_a_cm_inv, dtype=float).reshape(-1)
+    if radii.size == 0 or dsa_values.size == 0:
+        raise ValueError("rod_radii_cm and delta_sigma_a_cm_inv must be non-empty")
+    if np.any(radii <= 0.0):
+        raise ValueError("rod_radii_cm must contain positive values")
+    if np.any(dsa_values <= 0.0):
+        raise ValueError("delta_sigma_a_cm_inv must contain positive values")
+
+    low, high = target_full_total_pcm
+    if low > high:
+        raise ValueError("target_full_total_pcm must be (low, high)")
+    target_mid = 0.5 * (low + high)
+
+    rows: list[dict] = []
+    for radius_cm in radii:
+        for dsa in dsa_values:
+            candidate = replace(template, r_rod=float(radius_cm), dSa_rod=float(dsa))
+            scan = scan_rod_worth_2d(
+                candidate,
+                x_values=[0.0, 1.0],
+                dr=dr,
+                dz=dz,
+                max_iter=max_iter,
+                tol=tol,
+                warm_start=True,
+            )
+            full_total = float(scan["rho_total_pcm"][-1])
+            full_delta = float(scan["delta_rho_pcm"][-1])
+            row = {
+                "rod_radius_cm": float(radius_cm),
+                "delta_sigma_a_cm_inv": float(dsa),
+                "k_clean": float(scan["k_clean"]),
+                "rho_clean_pcm": float(scan["rho_clean_pcm"]),
+                "full_insertion_total_pcm": full_total,
+                "full_insertion_delta_rho_pcm": full_delta,
+                "in_target": bool(low <= full_total <= high),
+            }
+            rows.append(row)
+
+    rows.sort(
+        key=lambda row: (
+            0 if row["in_target"] else 1,
+            abs(row["full_insertion_total_pcm"] - target_mid),
+            row["rod_radius_cm"],
+            row["delta_sigma_a_cm_inv"],
+        )
+    )
+    return rows
+
+
 def with_fuel_radius_2d(model: Model2D, r_fuel: float, h_to_r: float = 2.0) -> Model2D:
     """Return a copy of *model* with R_fuel (and H = h_to_r × R_fuel) updated.
 
@@ -538,12 +700,15 @@ __all__ = [
     "find_critical_radius",
     "find_critical_radius_2d",
     "harmonic_mean",
+    "estimate_critical_insertion",
     "make_rod_region",
     "rho_pcm",
     "rodded_model",
+    "scan_rod_worth_2d",
     "solve_2d",
     "solve_keff",
     "solve_tridiagonal",
+    "sweep_shutdown_bank_design_2d",
     "with_fuel_radius",
     "with_fuel_radius_2d",
 ]

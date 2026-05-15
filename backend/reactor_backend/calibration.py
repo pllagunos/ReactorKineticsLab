@@ -24,20 +24,34 @@ ESTIMATE2_NOMINAL_FLUX_N_CM2_S: float = 1.5e12
 ESTIMATE2_NOMINAL_POWER_MW: float = 20.0
 
 # ---------------------------------------------------------------------------
+# Combined control/shutdown bank design
+# ---------------------------------------------------------------------------
+# Central equivalent shutdown-bank geometry selected from 2D sweep:
+# - rod radius widened from 10 cm to 50 cm (equivalent absorber volume)
+# - stronger effective absorber increment in the inserted zone
+ROD_RADIUS_CM: float = 50.0
+ROD_DELTA_SIGMA_A_MAX_CM_INV: float = 0.25
+
+# Clean-core operating point from fine-mesh 2D solve (unrodded, x=0).
+CLEAN_CORE_KEFF: float = 1.000395
+CLEAN_CORE_BASE_EXCESS_PCM: float = 39.4
+
+# ---------------------------------------------------------------------------
 # 2D rod-worth scan: insertion fraction x → Δρ (pcm)
 # ---------------------------------------------------------------------------
 # Δρ(x) = ρ_pcm(k_rod(x)) − ρ_pcm(k_unrod)  where k_unrod = 1.000395
 #
-# x = 0.0 is forced to 0.0 (clean unrodded core = critical reference).
-# The raw notebook value at x = 0.0 was +0.5 pcm and at x = 0.1 was +0.6 pcm;
-# these are mesh warm-start artefacts of the finite-difference grid, not
-# physics effects.  x = 0.1 retains its raw value; the magnitude is negligible.
+# x = 0.0 is forced to 0.0 by definition (reference against itself).
+# This table is for the combined control/shutdown bank that reaches a modest
+# shutdown margin at full insertion while still giving an intermediate
+# operating critical point (~32 % insertion).
 #
-# Full-insertion rod worth: −29.0 pcm (differential worth peaks near 50–60 %
-# insertion, reflecting the cosine-shaped axial flux weighting).
+# Full-insertion rod worth: −159.6 pcm relative to unrodded.
 ROD_WORTH_X: tuple[float, ...] = (0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0)
 ROD_WORTH_DELTA_RHO_PCM: tuple[float, ...] = (
-    0.0, 0.6, -0.9, -4.1, -8.4, -13.4, -18.6, -23.3, -26.8, -28.6, -29.0
+    0.0, -4.7, -16.3, -34.7, -58.1, -84.7, -111.9, -136.2, -152.5, -158.9, -159.6
 )
 
-FULL_INSERTION_ROD_WORTH_PCM: float = 29.0
+FULL_INSERTION_ROD_WORTH_PCM: float = 159.6
+CRITICAL_INSERTION_PERCENT: float = 32.0
+FULL_INSERTION_TOTAL_PCM: float = -120.2

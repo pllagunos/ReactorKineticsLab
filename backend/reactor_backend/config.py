@@ -1,5 +1,15 @@
 from dataclasses import dataclass
 
+from .calibration import (
+    CRITICAL_INSERTION_PERCENT,
+    ESTIMATE2_H_ACTIVE_CM,
+    ESTIMATE2_NOMINAL_FLUX_N_CM2_S,
+    ESTIMATE2_NOMINAL_POWER_MW,
+    ESTIMATE2_R_FUEL_CM,
+    ESTIMATE2_R_INNER_CM,
+    FULL_INSERTION_ROD_WORTH_PCM,
+)
+
 
 @dataclass(frozen=True)
 class DelayedNeutronGroup:
@@ -54,18 +64,18 @@ REACTOR_MODEL = ReactorModelConfig(
     beta_effective_pcm=651,
     # Estimate 2 geometry (2D-critical clean core, from theory/reactorModel.ipynb)
     core_geometry=CoreGeometryConfig(
-        active_height_meters=6.912,   # H_active = 691.2 cm
-        inner_radius_meters=0.80,     # R_inner  =  80.0 cm (unchanged)
-        outer_radius_meters=3.456,    # R_fuel   = 345.6 cm
+        active_height_meters=ESTIMATE2_H_ACTIVE_CM / 100.0,
+        inner_radius_meters=ESTIMATE2_R_INNER_CM / 100.0,
+        outer_radius_meters=ESTIMATE2_R_FUEL_CM / 100.0,
     ),
-    # Clean unrodded core is the critical reference; any rod insertion adds
-    # only negative worth (full bank worth ≈ −29 pcm from 2D r-z scan).
-    critical_rod_insertion_percent=0,
-    nominal_flux_neutrons_per_square_centimeter_second=1.5e12,
-    nominal_thermal_power_mw=20,
+    # Combined control/shutdown bank is tuned so normal operation is near
+    # critical around 32% insertion and fully inserted gives negative margin.
+    critical_rod_insertion_percent=CRITICAL_INSERTION_PERCENT,
+    nominal_flux_neutrons_per_square_centimeter_second=ESTIMATE2_NOMINAL_FLUX_N_CM2_S,
+    nominal_thermal_power_mw=ESTIMATE2_NOMINAL_POWER_MW,
     neutron_generation_time_seconds=5e-4,
     scram_shutdown_pcm=450,
-    total_control_rod_worth_pcm=29.0,  # magnitude of full-insertion worth (pcm)
+    total_control_rod_worth_pcm=FULL_INSERTION_ROD_WORTH_PCM,
 )
 
 SIMULATION_TUNING = SimulationTuningConfig(
