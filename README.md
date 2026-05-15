@@ -255,3 +255,4 @@ Now that the physics layer is in Python, natural next steps are:
 - maybe solve time dependent diffusion equation instead of point kinetics?
   - add subpage where this is done, with visualization of 2D axial and radial fluxes from inspo folder
 - integrate Modelica FMU for simple systems thermal hydraulics
+- The **prompt generation time** $\Lambda$ could benefite from an adjoint solve i think (or better, an OpenMC calculation so you get: multigroup coefficients, beta_eff and lambda for your 1 or 2 group diffusion simulation model)
