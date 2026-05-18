@@ -8,7 +8,7 @@
 \usepackage[utf8]{inputenc}
 \usepackage{lmodern}
 
-\title{How \texttt{reactorModel.ipynb} Drives the Reactor Web App}
+\title{Reactor Kinetics Lab Physics and Numerical Methods}
 \author{}
 \date{}
 
@@ -18,7 +18,9 @@
 
 \section{Purpose}
 
-This note explains how the repository's physics is split across:
+This note is the project-wide physics and numerics reference for the current
+\emph{Reactor Kinetics Lab} repository.  It explains how the implemented models
+are split across:
 \begin{itemize}
   \item the exploratory notebook \texttt{theory/reactorModel.ipynb},
   \item the point-kinetics web simulation shown on the \emph{Overview} page,
@@ -27,9 +29,9 @@ This note explains how the repository's physics is split across:
   \emph{Transient Diffusion} page.
 \end{itemize}
 
-The notebook is the \textbf{source of modeling logic and calibration workflow}.
-The web app is the \textbf{interactive execution layer}.  The most important
-architectural point is:
+The notebook is an important \textbf{calibration and derivation workspace}, while
+the Python backend and React frontend are the \textbf{runtime implementation}.
+The most important architectural point is:
 
 \begin{quote}
 The repository now contains \textbf{two transient models}: a fast
@@ -39,11 +41,14 @@ page.  Both are tied back to the same one-group annular-core assumptions and
 the same notebook-derived calibration data.
 \end{quote}
 
-\section{What the notebook does}
+\section{Role of the notebook}
 
 The notebook \texttt{theory/reactorModel.ipynb} studies a heavy-water moderated
 annular reactor with cylindrical symmetry in $(r,z)$ and a top-inserted central
-control/shutdown bank.  It has two estimation levels.
+control/shutdown bank.  It is not the simulator itself; instead it is the place
+where the simplified reactor model is derived, calibrated, and sanity-checked
+before the resulting constants and algorithms are frozen into the production
+code.  It has two estimation levels.
 
 \subsection{Estimate 1: homogeneous buckling sanity check}
 
@@ -322,27 +327,65 @@ $x = 0.0, 0.1, \dots, 1.0$.
 \subsection{Numerical method}
 
 The point-kinetics equations are stiff, so the backend does not use explicit
-Euler.  Instead \texttt{engine.py} uses a \textbf{semi-implicit elimination of
-the precursors}.  For each step $\Delta t$,
+Euler.  Instead \texttt{engine.py} advances both the neutron population and the
+precursors implicitly at the new time level and then algebraically eliminates
+the precursor unknowns.
+
+Start from the backward-Euler discretization
+\begin{align}
+\frac{n^{k+1} - n^k}{\Delta t}
+&=
+\frac{\rho-\beta}{\Lambda} n^{k+1}
++ \sum_{i=1}^6 \lambda_i C_i^{k+1},
+\\
+\frac{C_i^{k+1} - C_i^k}{\Delta t}
+&=
+\frac{\beta_i}{\Lambda} n^{k+1} - \lambda_i C_i^{k+1}.
+\end{align}
+
+Solving the precursor equation for the new precursor gives
 \[
 C_i^{k+1}
 =
 \frac{C_i^k + \Delta t\,(\beta_i/\Lambda)\,n^{k+1}}
 {1 + \lambda_i \Delta t},
 \]
-and substituting that into the neutron balance yields a stable scalar update for
-$n^{k+1}$.
+which is the relation already visible in the source.
 
-In the implemented solver this is written in the form
+Substituting that expression into the neutron balance yields
+\[
+\frac{n^{k+1} - n^k}{\Delta t}
+=
+\frac{\rho-\beta}{\Lambda} n^{k+1}
++ \sum_i \lambda_i
+\frac{C_i^k + \Delta t\,(\beta_i/\Lambda)\,n^{k+1}}
+{1+\lambda_i\Delta t}.
+\]
+
+Now separate the terms involving only known old-state data from the terms that
+still multiply $n^{k+1}$:
+\[
+\frac{n^{k+1} - n^k}{\Delta t}
+=
+\sum_i \frac{\lambda_i C_i^k}{1+\lambda_i\Delta t}
++
+\left[
+\frac{\rho-\beta}{\Lambda}
++ \sum_i \frac{\lambda_i \Delta t\,\beta_i/\Lambda}{1+\lambda_i\Delta t}
+\right] n^{k+1}.
+\]
+
+Rearranging gives one scalar solve for the new neutron population,
 \[
 n^{k+1}
 =
 \frac{n^k + \Delta t\sum_i \dfrac{\lambda_i C_i^k}{1+\lambda_i\Delta t}}
 {1 - \Delta t\,\dfrac{\rho-\beta}{\Lambda}
  - \Delta t\sum_i
-   \dfrac{\lambda_i \Delta t\,\beta_i/\Lambda}{1+\lambda_i\Delta t}},
+   \dfrac{\lambda_i \Delta t\,\beta_i/\Lambda}{1+\lambda_i\Delta t}}.
 \]
-which matches the code variables
+
+In the implementation this matches the code variables
 \texttt{delayed\_source}, \texttt{delayed\_coupling}, \texttt{numerator}, and
 \texttt{denominator} in \texttt{engine.py}.  The precursor update then uses the
 newly computed $n^{k+1}$.
@@ -433,6 +476,31 @@ where:
   \item $L$ is a sparse loss matrix containing leakage and absorption,
   \item $F$ is a diagonal sparse matrix containing $\nu\Sigma_f$ in fuel cells
         and zero elsewhere.
+\end{itemize}
+
+The reason for that structure is direct.  After cell-centered finite-difference
+discretization, the loss term at cell $(i,j)$ depends only on:
+\begin{itemize}
+  \item the flux in the same cell,
+  \item the two radial neighbors $(i-1,j)$ and $(i+1,j)$,
+  \item and the two axial neighbors $(i,j-1)$ and $(i,j+1)$.
+\end{itemize}
+
+So each row of $L$ contains only a small five-point stencil worth of nonzero
+entries, making $L$ sparse.  By contrast, the fission source has no spatial
+derivative in this one-group model; it is simply
+\[
+\left(F\phi\right)_{ij} = \nu\Sigma_{f,ij}\phi_{ij}.
+\]
+That is a cell-local multiplication, so after flattening the 2D mesh into a
+single vector, $F$ becomes diagonal.
+
+In other words:
+\begin{itemize}
+  \item \textbf{leakage/absorption} move neutrons between nearby cells or remove
+        them locally $\rightarrow$ sparse coupling matrix $L$,
+  \item \textbf{fission production} multiplies the flux only in the current cell
+        $\rightarrow$ diagonal production matrix $F$.
 \end{itemize}
 
 \subsection{How the steady eigenvalue solve works numerically}
@@ -708,9 +776,10 @@ increasing levels of neutronics fidelity}, not as a licensing-grade core code.
 
 \section{Bottom line}
 
-\texttt{reactorModel.ipynb} is the repository's physics workbench: it derives the
-effective one-group annular-core picture, performs the 2D criticality and
-rod-worth studies, and defines the constants later frozen into the backend.
+The repository currently implements a hierarchy of reduced reactor models with
+increasing spatial fidelity.  The notebook remains the physics workbench that
+derives the one-group annular-core picture, performs the 2D criticality and
+rod-worth studies, and helps justify the frozen constants used by the backend.
 
 The web app then uses that physics in two ways:
 \begin{itemize}
