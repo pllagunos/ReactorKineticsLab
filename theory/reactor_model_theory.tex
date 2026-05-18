@@ -161,6 +161,37 @@ region with
 This is likewise an effective one-group quantity rather than a detailed rod-cell
 transport model.
 
+\subsection{How the physics was manipulated into these constants}
+
+This project deliberately compresses more detailed reactor physics into a
+one-group annular model that can run interactively.  The main reductions are:
+\begin{enumerate}
+  \item \textbf{Energy collapse.}  Multigroup slowing-down and spectral effects
+        are represented by a single thermal group with effective
+        $(D,\Sigma_a,\nu\Sigma_f)$.
+  \item \textbf{Lattice homogenization.}  The fuel annulus is not modeled as
+        explicit fuel pins in moderator.  Instead natural uranium and D$_2$O are
+        volume-averaged into one fissile ring region.
+  \item \textbf{Leakage folded into effective losses.}  In a one-group model,
+        any loss of neutrons to higher-energy groups or to unresolved geometric
+        detail is represented as part of an effective absorption-like loss.
+  \item \textbf{Equivalent rod model.}  The real control/shutdown system is
+        collapsed to one central cylindrical absorber with an effective radius
+        and an effective extra absorption $\Delta\Sigma_a$.
+  \item \textbf{Calibration by 2D diffusion, not by transport.}  The final rod
+        worth curve and critical insertion are taken from repeated diffusion
+        eigenvalue solves, then frozen for the point model.
+\end{enumerate}
+
+The notebook is explicit about these manipulations.  For example, the D$_2$O
+``effective'' $\Sigma_a$ is much larger than the true 2200 m/s absorption of
+pure heavy water, because the one-group model uses $\Sigma_a$ as a \emph{net
+loss coefficient} after spectral and geometric simplification.  Likewise, the
+fuel-annulus $\Sigma_a$ is intentionally inflated relative to a naive
+2200 m/s natural-uranium homogenization so the one-group annular model better
+matches the critical-size and rod-worth behavior seen in the notebook's 2D
+studies.
+
 \subsection{Boundary assumptions}
 
 The diffusion solves use extrapolated zero-flux boundaries rather than placing
@@ -176,8 +207,8 @@ solver code:
 
 \begin{enumerate}
   \item \textbf{Estimate 1} gives an analytical reference for rough critical size.
-  \item \textbf{Estimate 2} performs the annular $r$--$z$ diffusion study used
-        for production calibration.
+  \item \textbf{Estimate 2} performs the annular $r$--$z$ diffusion study that
+        supplies the production calibration.
   \item The resulting geometry, material constants, and rod-worth data are copied
         into \texttt{calibration.py}.
   \item The backend then exposes two kinds of runtime models:
@@ -189,6 +220,24 @@ solver code:
 
 So the notebook is best viewed as the \textbf{physics derivation and calibration
 workspace}, while the Python backend is the \textbf{production implementation}.
+
+\subsection{How the notebook output becomes backend input}
+
+The handoff from notebook to code is not symbolic; it is numerical.  The
+production backend lifts the notebook's final values into
+\texttt{calibration.py}:
+\begin{itemize}
+  \item annular geometry dimensions,
+  \item one-group material constants,
+  \item clean-core $k_{\mathrm{eff}}$ and excess reactivity,
+  \item the 11-point rod-worth table,
+  \item and the derived critical insertion percentage.
+\end{itemize}
+
+This means the backend no longer recomputes those design-calibration studies on
+startup.  Instead it assumes the notebook has already answered the
+``what reactor are we modeling?'' question and the Python solvers answer the
+``how does that reactor evolve for this input?'' question.
 
 \section{Overview page: point-kinetics transient model}
 
@@ -284,6 +333,41 @@ C_i^{k+1}
 and substituting that into the neutron balance yields a stable scalar update for
 $n^{k+1}$.
 
+In the implemented solver this is written in the form
+\[
+n^{k+1}
+=
+\frac{n^k + \Delta t\sum_i \dfrac{\lambda_i C_i^k}{1+\lambda_i\Delta t}}
+{1 - \Delta t\,\dfrac{\rho-\beta}{\Lambda}
+ - \Delta t\sum_i
+   \dfrac{\lambda_i \Delta t\,\beta_i/\Lambda}{1+\lambda_i\Delta t}},
+\]
+which matches the code variables
+\texttt{delayed\_source}, \texttt{delayed\_coupling}, \texttt{numerator}, and
+\texttt{denominator} in \texttt{engine.py}.  The precursor update then uses the
+newly computed $n^{k+1}$.
+
+Numerically, this matters because the prompt part of the kinetics is very fast
+relative to the slowest delayed groups.  A naive explicit step would require a
+much smaller $\Delta t$ for stability, while the semi-implicit update remains
+well behaved for the chosen browser-friendly step size.
+
+\subsection{How the Overview transient is operationalized}
+
+The point-kinetics equations are not advanced continuously in a background
+thread.  Instead \texttt{service.py} advances them \emph{opportunistically}
+whenever the frontend polls or sends a command:
+\begin{enumerate}
+  \item compute elapsed wall time since the last request,
+  \item cap that wall-time gap to avoid large jumps after browser pauses,
+  \item multiply by the configured time-scale factor,
+  \item then march the engine forward in repeated $0.02$ s internal steps.
+\end{enumerate}
+
+This architecture is a numerical simplification as much as a software one: the
+browser sees a continuous transient, but the backend actually performs a sequence
+of bounded substeps and samples history only every $0.25$ s.
+
 The current runtime tuning is:
 \begin{center}
 \begin{tabular}{lc}
@@ -323,6 +407,81 @@ The production Core page solve runs at
 \]
 and results are cached by rod insertion state so repeated requests do not repeat
 the full eigenvalue solve.
+
+\subsection{How the steady diffusion matrices are built}
+
+The Python solver does not discretize the Laplacian in Cartesian form and then
+``pretend'' the reactor is cylindrical.  It assembles the operator directly in
+cylindrical coordinates.  On each cell-centered mesh point $(r_i,z_j)$ it builds:
+\begin{itemize}
+  \item radial couplings weighted by the cylindrical face areas $r_{i\pm 1/2}$,
+  \item axial couplings weighted by $1/\Delta z^2$,
+  \item and a diagonal absorption term from the local $\Sigma_a$.
+\end{itemize}
+
+Material interfaces are handled with the harmonic mean of adjacent diffusion
+coefficients, which is the standard finite-volume-like choice for discontinuous
+media because it preserves current continuity better than a simple arithmetic
+average.
+
+The assembled linear system can be written schematically as
+\[
+L\phi = \frac{1}{k}F\phi,
+\]
+where:
+\begin{itemize}
+  \item $L$ is a sparse loss matrix containing leakage and absorption,
+  \item $F$ is a diagonal sparse matrix containing $\nu\Sigma_f$ in fuel cells
+        and zero elsewhere.
+\end{itemize}
+
+\subsection{How the steady eigenvalue solve works numerically}
+
+The function \texttt{solve\_2d()} uses a source-iteration / power-iteration
+structure:
+\begin{enumerate}
+  \item start from a positive flux guess $\phi$ and an initial $k=1$,
+  \item compute the fission source $F\phi$,
+  \item solve the fixed loss system
+        \[
+        L\phi^{*} = F\phi
+        \]
+        with a sparse direct solver,
+  \item clip tiny negative roundoff values to zero,
+  \item normalize $\phi^{*}$ by its peak,
+  \item update the eigenvalue with the ratio of new to old total fission source,
+        \[
+        k_{\mathrm{new}} = \frac{\sum(F\phi^{*})}{\sum(F\phi)},
+        \]
+  \item and repeat until $|k_{\mathrm{new}}-k| < \texttt{tol}$ after a few warmup
+        iterations.
+\end{enumerate}
+
+Two numerical choices are especially important:
+\begin{itemize}
+  \item the loss matrix $L$ is factorized once per solve with
+        \texttt{scipy.sparse.linalg.factorized()}, so each iteration is just a
+        triangular solve instead of a fresh matrix inversion;
+  \item the flux is normalized by peak value, not by integral power, because the
+        steady eigenproblem only needs the shape and eigenvalue.
+\end{itemize}
+
+\subsection{How geometry and rod-worth calibration are solved}
+
+The notebook and backend use the steady diffusion solver in two further numerical
+loops:
+\begin{enumerate}
+  \item \textbf{critical-radius search:} bisection on $R_{\mathrm{fuel}}$ until
+        the solved $k_{\mathrm{eff}}$ brackets unity to within tolerance;
+  \item \textbf{rod-worth scan:} repeated solves at insertion fractions
+        $x=0,0.1,\dots,1.0$, converting each $k$ to reactivity
+        $\rho = (k-1)/k$ in pcm.
+\end{enumerate}
+
+The rod-worth scan may warm-start each solve with the previous flux shape.  That
+is a purely numerical acceleration: neighboring rod positions have similar flux
+shapes, so reusing the previous converged state reduces iteration count without
+changing the underlying model.
 
 \subsection{What the page returns}
 
@@ -407,6 +566,49 @@ C_i^{n+1}
 This scheme is unconditionally stable for the linear model and is much better
 suited than explicit Euler to delayed-neutron reactor kinetics.
 
+In implementation terms, the transient solver performs three numerically distinct
+operations:
+\begin{enumerate}
+  \item \textbf{Initialization:} run a steady \texttt{solve\_2d()} eigenvalue
+        solve on the transient mesh, flatten the 2D flux field, and initialize
+        each precursor field with the steady relation
+        \[
+        C_{i,0} = \frac{\beta_i}{\lambda_i}\frac{\nu\Sigma_f}{k_{\mathrm{ref}}}\phi_0.
+        \]
+  \item \textbf{Matrix rebuild on rod motion:} if rod insertion changes, rebuild
+        the sparse matrix $A$ and refactorize it.  In code this cache is keyed by
+        the rounded rod fraction together with $k_{\mathrm{ref}}$.
+  \item \textbf{Cheap repeated stepping between rod changes:} if rod insertion is
+        unchanged, reuse the cached LU factorization so each new time step is
+        just one sparse linear solve plus explicit vector updates for the six
+        precursor groups.
+\end{enumerate}
+
+This split is why the transient page can remain interactive even though it is a
+full spatial solver: the expensive part is the factorization, not the individual
+post-factorization time steps.
+
+\subsection{How the transient physics is manipulated into a solvable model}
+
+The transient page is more detailed than point kinetics, but it is still not a
+full reactor multiphysics model.  Several physics reductions are built into the
+solver:
+\begin{itemize}
+  \item prompt and delayed neutrons are treated in one energy group,
+  \item thermal-hydraulic feedback is absent, so all cross sections stay fixed
+        while the transient runs,
+  \item rod motion changes only the absorber map inside the central control-bank
+        cylinder,
+  \item the internally stored flux is an \emph{absolute amplitude field}, while
+        UI heatmaps are separately peak-normalized display copies,
+  \item and power is derived from a cylindrical fission integral rather than from
+        a standalone thermal-hydraulic power balance.
+\end{itemize}
+
+That last point is numerically important: the solver never renormalizes its
+internal state after each step.  If it did, the transient could not display real
+growth or decay in $P/P_0$.
+
 \subsection{Runtime settings}
 
 To keep the direct transient responsive in a browser-driven local app, the
@@ -427,6 +629,22 @@ History limit & 200 points \\
 
 The transient mesh is intentionally coarser than the Core page mesh so the LU
 factorization can be rebuilt quickly whenever rod insertion changes.
+
+\subsection{Service-level time stepping}
+
+The transient page is advanced by \texttt{transient\_service.py}, which keeps one
+shared solver instance and one shared state vector.  On every
+\texttt{GET /api/transient-diffusion/state} request it:
+\begin{enumerate}
+  \item measures elapsed wall time,
+  \item converts that to simulated time at a fixed scale of $1\times$,
+  \item computes how many whole 1 s transient steps fit in that interval,
+  \item caps the advance to at most four steps per request,
+  \item and appends one history sample per accepted time step.
+\end{enumerate}
+
+This cap is not part of the physics model; it is a numerical and UX safeguard so
+one delayed frontend poll cannot trigger an unexpectedly long blocking solve.
 
 \subsection{Power normalization}
 
@@ -452,13 +670,13 @@ $r_j \Delta r \Delta z$ weight per cell.
 \section{How the three app pages relate}
 
 \begin{center}
-\begin{tabular}{p{2.7cm}p{4.0cm}p{6.0cm}}
+\begin{tabular}{p{2.6cm}p{3.8cm}p{6.1cm}}
 \toprule
 Layer & Model & Purpose \\
 \midrule
-Notebook estimate 1 & Homogeneous buckling & First-pass analytical check of size and leakage trends \\
+Notebook estimate 1 & Homogeneous buckling & First-pass analytical check of scale and leakage trends \\
 Notebook estimate 2 / Core page & Steady 2D one-group diffusion & Compute $k_{\mathrm{eff}}$, flux maps, and rod-worth calibration \\
-Overview page & 0D six-group point kinetics & Fast transient driven by the notebook-derived reactivity curve \\
+Overview page & 0D six-group point kinetics & Fast transient driven by the calibrated reactivity curve \\
 Transient Diffusion page & 2D diffusion + 6 precursor fields & Spatial transient with evolving flux shape and power \\
 \bottomrule
 \end{tabular}
