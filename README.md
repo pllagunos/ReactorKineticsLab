@@ -251,6 +251,8 @@ Intentional simplifications:
 
 Now that the physics layer is in Python, natural next steps are:
 
+- see `theory/ThermalHydraulics.tex` for a first-pass thermal-hydraulic sizing
+  and Modelica architecture note tied to the current 20 MW annular-core geometry
 - add subpage where for time dependent diffusion with flux visualizations
   - could also use standard point kinetics but rod insertion reactivity be calculated via diffusion?
 - integrate Modelica FMU for simple systems thermal hydraulics

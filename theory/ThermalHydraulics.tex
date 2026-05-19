@@ -1,0 +1,359 @@
+\documentclass[11pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+
+\title{Thermal Hydraulics for Reactor Kinetics Lab}
+\author{}
+\date{}
+
+\begin{document}
+
+\maketitle
+
+\section{Purpose}
+
+This note is a first-pass thermal-hydraulics design reference for the
+\emph{Reactor Kinetics Lab} repository.  Its purpose is not to produce a final
+plant design.  Instead, it does three narrower things:
+
+\begin{enumerate}
+  \item explains why the current Modelica prototype overheats so quickly,
+  \item derives rough coolant-capacity targets from the repository's existing
+        20 MW annular-core assumptions,
+  \item converts those targets into a more realistic Modelica subsystem
+        structure for the next implementation pass.
+\end{enumerate}
+
+The intended use is practical: this note should give enough engineering scale to
+replace the current toy loop with a research-reactor-like thermal-hydraulic
+model that stays within plausible operating temperatures.
+
+\section{Current mismatch}
+
+The current Python neutronics model assumes a reactor with:
+
+\begin{itemize}
+  \item nominal thermal power of 20 MW,
+  \item annular active core geometry with $R_{\mathrm{inner}} = 0.8$ m,
+        $R_{\mathrm{fuel}} = 3.456$ m, and active height $H = 6.912$ m,
+  \item heavy-water moderation as the frozen physics assumption.
+\end{itemize}
+
+The current Modelica primary-loop prototype is useful as a numerical proof of
+concept, but it is still a small pedagogical loop.  In particular, the present
+prototype:
+
+\begin{itemize}
+  \item uses a single equivalent heated pipe rather than a reactor-scale coolant
+        channel network,
+  \item uses a simple radiator-like sink rather than a reactor heat exchanger,
+  \item has no explicit saturation-margin target,
+  \item does not yet enforce a reactor-appropriate pressure regime.
+\end{itemize}
+
+That is why the hot-leg temperature can shoot toward values such as
+$400^{\circ}\mathrm{C}$ even while the return side remains much cooler.  The
+prototype is absorbing heat numerically, but it is not yet constrained by the
+real coolant inventory, realistic flow capacity, or a physically chosen primary
+operating envelope.  A real low-pressure research reactor would not tolerate a
+bulk outlet temperature anywhere near this regime; long before that point,
+boiling, voiding, structural damage, and severe operational upset would occur.
+
+\section{Reactor-scale inputs}
+
+For this note, the frozen reactor-scale inputs are taken directly from the
+existing repository documentation:
+
+\begin{center}
+\begin{tabular}{lc}
+\hline
+Quantity & Value \\
+\hline
+Nominal thermal power $P$ & $20$ MW \\
+Inner moderator radius $R_{\mathrm{inner}}$ & $0.8$ m \\
+Fuel outer radius $R_{\mathrm{fuel}}$ & $3.456$ m \\
+Active height $H$ & $6.912$ m \\
+Primary coolant assumption & D$_2$O \\
+\hline
+\end{tabular}
+\end{center}
+
+The active annular volume is approximated by
+\[
+V_{\mathrm{core}} = \pi \left(R_{\mathrm{fuel}}^2 - R_{\mathrm{inner}}^2\right) H.
+\]
+
+Using the current geometry,
+\[
+V_{\mathrm{core}} \approx \pi \left(3.456^2 - 0.8^2\right) \times 6.912
+\approx 245.5\ \mathrm{m^3}.
+\]
+
+This gives an average volumetric power density of
+\[
+q''' = \frac{P}{V_{\mathrm{core}}}
+\approx \frac{20 \times 10^6}{245.5}
+\approx 8.15 \times 10^4\ \mathrm{W/m^3}
+= 0.0815\ \mathrm{MW/m^3}.
+\]
+
+This value is not extreme for a large, heavily moderated core.  The main issue
+is therefore not that the core is too power-dense, but that the present
+prototype loop is not sized to move reactor-scale heat with reactor-scale
+coolant flow.
+
+\section{Cooling-capacity estimates}
+
+\subsection{Bulk coolant temperature rise}
+
+For a first-pass heavy-water estimate, it is acceptable to use water-like bulk
+properties for sizing:
+
+\[
+c_p \approx 4.2\ \mathrm{kJ/(kg\,K)},
+\qquad
+\rho \approx 1100\ \mathrm{kg/m^3}.
+\]
+
+The required mass flow for a chosen bulk temperature rise is approximated by
+\[
+\dot{m} = \frac{Q}{c_p \Delta T}.
+\]
+
+For $Q = 20$ MW, the required total primary-loop flow is:
+
+\begin{center}
+\begin{tabular}{lcc}
+\hline
+Bulk rise $\Delta T$ & $\dot{m}$ [kg/s] & $\dot{V}$ [m$^3$/s] \\
+\hline
+10 K & 476.2 & 0.4329 \\
+20 K & 238.1 & 0.2165 \\
+30 K & 158.7 & 0.1443 \\
+40 K & 119.0 & 0.1082 \\
+50 K & 95.2 & 0.0866 \\
+\hline
+\end{tabular}
+\end{center}
+
+The most useful design range for the next Modelica pass is the middle of this
+table, not the extremes.  A 20 K to 30 K bulk rise is a reasonable first target
+for a research-reactor-like forced-circulation system.  That implies a total
+primary mass flow on the order of 160 to 240 kg/s.
+
+\subsection{Recommended bulk temperature envelope}
+
+Because the current repository concept is much closer to a research reactor than
+to a high-temperature power reactor, the next Modelica model should target a
+bulk operating envelope well below the saturation concerns implied by a
+$400^{\circ}\mathrm{C}$ hot leg.  A practical first-pass envelope is:
+
+\begin{center}
+\begin{tabular}{lc}
+\hline
+Quantity & Suggested target \\
+\hline
+Primary inlet bulk temperature & $45$--$60^{\circ}\mathrm{C}$ \\
+Primary outlet bulk temperature & $65$--$90^{\circ}\mathrm{C}$ \\
+Bulk rise across core & $20$--$30$ K \\
+Pressure regime & low-pressure or modestly pressurized \\
+\hline
+\end{tabular}
+\end{center}
+
+This does not prove safety margins, but it does set a sane target for the next
+Modelica architecture: the hot leg should stay in a low-temperature,
+single-phase, research-reactor regime rather than drifting toward a PWR-like
+high-temperature regime that the current design does not support.
+
+\subsection{Heat-transfer surface argument}
+
+If the annulus were naively cooled only through its inner and outer cylindrical
+boundaries, the corresponding bounding area would be
+\[
+A_{\mathrm{bounds}} = 2\pi (R_{\mathrm{inner}} + R_{\mathrm{fuel}}) H
+\approx 184.8\ \mathrm{m^2}.
+\]
+
+At 20 MW, that would correspond to an average heat flux of
+\[
+q'' \approx \frac{20 \times 10^6}{184.8} \approx 108\ \mathrm{kW/m^2}.
+\]
+
+This is already enough to show that the next Modelica model should not be built
+as one tiny equivalent pipe with one tiny equivalent wall area.  A real core
+would expose a much larger wetted area through many coolant channels, plates, or
+subassemblies.  Therefore the next thermal-hydraulic abstraction should move
+toward \emph{parallel channels plus plena}, not a single narrow toy conduit.
+
+\subsection{Pump-duty scale}
+
+The hydraulic power scale is also useful for planning.  Using
+\[
+W_{\mathrm{pump}} \approx \frac{\Delta p\,\dot{V}}{\eta},
+\]
+with $\eta \approx 0.7$ and the flow rates above, the shaft-power scale is on
+the order of:
+
+\begin{center}
+\begin{tabular}{lccc}
+\hline
+Bulk rise $\Delta T$ & $\Delta p = 0.5$ MPa & $1.0$ MPa & $2.0$ MPa \\
+\hline
+20 K & 155 kW & 309 kW & 618 kW \\
+30 K & 103 kW & 206 kW & 412 kW \\
+40 K & 77 kW & 155 kW & 309 kW \\
+\hline
+\end{tabular}
+\end{center}
+
+These are only order-of-magnitude values, but they are already enough to guide
+the next Modelica system away from a tiny pump and toward a reactor-scale head
+curve with meaningful coastdown behavior.
+
+\section{Candidate primary-loop architectures}
+
+\subsection{Option A: low-pressure research-reactor concept}
+
+The first candidate is a low-pressure, large-inventory heavy-water system with
+forced circulation through a channelized core and a separate heat sink.  This is
+the option that best matches the current repository's research-reactor framing.
+
+Its main features would be:
+
+\begin{itemize}
+  \item inlet and outlet plena with significant coolant inventory,
+  \item many effective coolant channels through the core,
+  \item a forced-circulation pump train,
+  \item a primary heat exchanger or cooler outside the core,
+  \item bulk temperatures kept comfortably below boiling.
+\end{itemize}
+
+This option is the most natural follow-on to the existing open-tank intuition,
+but it must become much more structured than the current prototype.  In
+particular, the ``open tank + radiator'' picture should evolve into
+``plenum/vessel volumes + channel bank + dedicated heat sink.''
+
+\subsection{Option B: closed forced-circulation loop with secondary side}
+
+The second candidate is a more explicitly closed D$_2$O primary loop feeding a
+secondary heat exchanger.  This offers cleaner control over pressure and heat
+rejection, and it is easier to connect to a later FMU co-simulation because the
+boundaries are more explicit.
+
+Its main features would be:
+
+\begin{itemize}
+  \item a closed primary inventory,
+  \item one or more pumps with a realistic head curve,
+  \item explicit primary-side heat exchanger,
+  \item secondary-side sink represented either by a fixed-temperature sink or a
+        simplified secondary loop.
+\end{itemize}
+
+This option is more structured and may eventually be better for FMI coupling,
+but it also moves the model farther from the very simple research-reactor-like
+mental model the current prototype was trying to preserve.
+
+\section{Recommended operating envelope and structure}
+
+For the next Modelica implementation, the recommended direction is:
+
+\begin{quote}
+Use a \textbf{low-temperature forced-circulation D$_2$O primary model} with
+\textbf{channelized core flow}, \textbf{plena or vessel volumes}, and an
+\textbf{explicit heat sink}, while keeping bulk outlet temperatures in the
+roughly $65$--$90^{\circ}\mathrm{C}$ range rather than allowing a
+high-temperature pressurized-loop regime to emerge by accident.
+\end{quote}
+
+That recommendation is based on three observations:
+
+\begin{enumerate}
+  \item the reactor-scale power density is modest enough that a large-flow,
+        low-temperature solution is plausible,
+  \item the current repository already assumes a research reactor, not a compact
+        power reactor,
+  \item the present Modelica overheating is better interpreted as a missing
+        thermal-hydraulic capacity model than as evidence that the reactor must
+        operate at very high primary temperatures.
+\end{enumerate}
+
+\section{Modelica implementation targets}
+
+The next thermal-hydraulic Modelica model should no longer be a single heated
+pipe plus radiator.  A better first abstraction is:
+
+\begin{enumerate}
+  \item \textbf{inlet plenum or lower vessel volume},
+  \item \textbf{equivalent channel bank} through the core, either as parallel
+        channels or one channel with explicit scaling parameters,
+  \item \textbf{outlet plenum or upper vessel volume},
+  \item \textbf{pump model} with a head curve and optional coastdown,
+  \item \textbf{primary heat exchanger or cooler} that removes the full 20 MW,
+  \item \textbf{pressure boundary strategy} consistent with a low-pressure or
+        modestly pressurized research-reactor system.
+\end{enumerate}
+
+The minimum FMI-oriented variable set should be:
+
+\begin{center}
+\begin{tabular}{ll}
+\hline
+Direction & Variables \\
+\hline
+Python $\rightarrow$ Modelica & total core power, axial power fractions, control actions \\
+Modelica $\rightarrow$ Python & inlet temperature, outlet temperature, total flow, pressure drop \\
+\hline
+\end{tabular}
+\end{center}
+
+For the channel abstraction, the following scaling logic is recommended:
+
+\begin{itemize}
+  \item total loop flow should be a reactor-scale quantity, about 160--240 kg/s
+        for a 20--30 K rise,
+  \item core heating should be distributed axially, as already planned,
+  \item the effective coolant area and wetted surface should represent many
+        channels, not one narrow laboratory pipe.
+\end{itemize}
+
+\section{Immediate implications for the current prototype}
+
+The present Modelica prototype is still useful, but it should now be interpreted
+as a \emph{numerical topology prototype}, not as a thermal-hydraulic design.
+Before adding full neutronics feedback, the next Modelica pass should at least:
+
+\begin{enumerate}
+  \item scale the nominal power from 10 kW-like behavior to the full 20 MW,
+  \item replace the tiny equivalent core pipe with a channel-bank abstraction,
+  \item replace the radiator sink with a reactor-scale heat sink or exchanger,
+  \item enforce a low-temperature operating envelope that prevents unrealistic
+        hot-leg temperatures.
+\end{enumerate}
+
+\section{Open questions}
+
+This note deliberately leaves several questions open for the next iteration:
+
+\begin{itemize}
+  \item Should the next primary model be low-pressure and open/pool-like, or
+        slightly pressurized but still firmly in a research-reactor regime?
+  \item How many effective parallel coolant channels are needed to make the
+        channel-bank abstraction believable without introducing unnecessary
+        numerical stiffness?
+  \item Is a heavy-water property package needed immediately, or is water-like
+        property approximation acceptable for the first reactor-scale thermal
+        sizing pass?
+\end{itemize}
+
+The key point is that these are now engineering-structure questions, not a sign
+that the reactor should be allowed to run at several hundred degrees Celsius in
+the primary loop.
+
+\end{document}
