@@ -31,7 +31,7 @@ The current version models a simplified **heavy-water-moderated annular core** w
 ### Install frontend dependencies
 
 ```bash
-bun install
+bun run frontend:install
 ```
 
 ### Create the backend environment with UV

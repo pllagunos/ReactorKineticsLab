@@ -6,7 +6,7 @@
   "scripts": {
     "backend:install": "cd backend && uv sync",
     "frontend:install": "bun install --cwd ./frontend",
-    "dev": "bun run --parallel dev:backend dev:frontend",
+    "dev": "bun run dev:backend & bun run dev:frontend & wait",
     "dev:backend": "cd backend && uv run uvicorn reactor_backend.app:app --reload --app-dir . --host 127.0.0.1 --port 8000",
     "dev:frontend": "bun run --cwd ./frontend dev",
     "build": "bun run --cwd ./frontend build",
