@@ -114,5 +114,6 @@ export function useReactorSimulation() {
     setRodInsertionPercent,
     setRunning,
     snapshot: state?.snapshot ?? null,
+    thermal: state?.thermal ?? null,
   }
 }

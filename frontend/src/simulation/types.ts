@@ -54,6 +54,18 @@ export type ReactorSnapshot = {
   totalFlux: number
 }
 
+export type ThermalSnapshot = {
+  available: boolean
+  source: 'fmu' | 'fallback' | 'unavailable'
+  timeSeconds: number
+  powerMw: number
+  inletTemperatureK: number | null
+  outletTemperatureK: number | null
+  massFlowKgPerSecond: number | null
+  corePressureDropPa: number | null
+  message: string | null
+}
+
 export type HistoryPoint = {
   reactivityPcm: number
   thermalPowerMw: number
@@ -66,6 +78,7 @@ export type SimulationState = {
   model: ReactorModel
   running: boolean
   snapshot: ReactorSnapshot
+  thermal: ThermalSnapshot
   tuning: SimulationTuning
 }
 

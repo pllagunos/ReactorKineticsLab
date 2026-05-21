@@ -6,6 +6,18 @@ const powerFormatter = new Intl.NumberFormat('en-US', {
   maximumFractionDigits: 1,
 })
 
+const temperatureFormatter = new Intl.NumberFormat('en-US', {
+  maximumFractionDigits: 1,
+})
+
+const massFlowFormatter = new Intl.NumberFormat('en-US', {
+  maximumFractionDigits: 1,
+})
+
+const pressureFormatter = new Intl.NumberFormat('en-US', {
+  maximumFractionDigits: 0,
+})
+
 const pcmFormatter = new Intl.NumberFormat('en-US', {
   maximumFractionDigits: 0,
   signDisplay: 'always',
@@ -21,6 +33,34 @@ export function formatPercent(percentValue: number) {
 
 export function formatPowerMw(powerMw: number) {
   return `${powerFormatter.format(powerMw)} MWth`
+}
+
+export function formatTemperatureK(temperatureK: number | null) {
+  if (temperatureK === null) {
+    return 'n/a'
+  }
+
+  return `${temperatureFormatter.format(temperatureK - 273.15)} °C`
+}
+
+export function formatMassFlow(massFlowKgPerSecond: number | null) {
+  if (massFlowKgPerSecond === null) {
+    return 'n/a'
+  }
+
+  return `${massFlowFormatter.format(massFlowKgPerSecond)} kg/s`
+}
+
+export function formatPressureDropPa(pressureDropPa: number | null) {
+  if (pressureDropPa === null) {
+    return 'n/a'
+  }
+
+  if (Math.abs(pressureDropPa) >= 1_000) {
+    return `${(pressureDropPa / 1_000).toFixed(2)} kPa`
+  }
+
+  return `${pressureFormatter.format(pressureDropPa)} Pa`
 }
 
 export function formatFlux(totalFlux: number) {
