@@ -2,6 +2,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
@@ -19,6 +20,7 @@ AXIAL_NAME_RE = re.compile(r"^axialPowerFractions\[(\d+)\]$")
 class ThermalAdapterConfig:
     model_name: str = "ResearchReactorThermalHydraulics"
     omc_command: str = "omc"
+    fmi_flags: str = "s:cvode"
 
     @property
     def repo_root(self) -> Path:
@@ -269,7 +271,11 @@ class ThermalAdapter:
     def _ensure_fmu(self) -> Path:
         model_file = self._config.model_file
         fmu_path = self._config.fmu_path
-        if fmu_path.exists() and fmu_path.stat().st_mtime >= model_file.stat().st_mtime:
+        if (
+            fmu_path.exists()
+            and fmu_path.stat().st_mtime >= model_file.stat().st_mtime
+            and self._fmu_has_expected_flags(fmu_path)
+        ):
             return fmu_path
 
         self._config.build_dir.mkdir(parents=True, exist_ok=True)
@@ -300,7 +306,9 @@ class ThermalAdapter:
 
     def _build_export_script(self) -> str:
         model_name = self._config.model_name
+        fmi_flags = self._config.fmi_flags.replace('"', '\\"')
         return (
+            f'setCommandLineOptions("--fmiFlags={fmi_flags}");\n'
             'system("mkdir -p build");\n'
             'cd("build");\n'
             'loadModel(Modelica);\n'
@@ -310,6 +318,19 @@ class ThermalAdapter:
             f'buildModelFMU({model_name}, version="2.0", fmuType="cs");\n'
             'getErrorString();\n'
         )
+
+    def _fmu_has_expected_flags(self, fmu_path: Path) -> bool:
+        expected = self._config.fmi_flags
+        try:
+            with zipfile.ZipFile(fmu_path) as archive:
+                resource_name = f"resources/{self._config.model_name}_flags.json"
+                if resource_name not in archive.namelist():
+                    return False
+                content = archive.read(resource_name).decode("utf-8", errors="ignore")
+        except OSError:
+            return False
+
+        return expected in content
 
     def _set_inputs(self, power_mw: float) -> None:
         assert self._fmu is not None
