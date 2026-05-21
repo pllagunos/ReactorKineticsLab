@@ -56,6 +56,18 @@ class ReactorSnapshot(BaseModel):
     totalFlux: float
 
 
+class ThermalSnapshot(BaseModel):
+    available: bool
+    source: Literal["fmu", "fallback", "unavailable"]
+    timeSeconds: float
+    powerMw: float
+    inletTemperatureK: Optional[float] = None
+    outletTemperatureK: Optional[float] = None
+    massFlowKgPerSecond: Optional[float] = None
+    corePressureDropPa: Optional[float] = None
+    message: Optional[str] = None
+
+
 class HistoryPoint(BaseModel):
     reactivityPcm: float
     thermalPowerMw: float
@@ -68,6 +80,7 @@ class SimulationState(BaseModel):
     model: ReactorModel
     running: bool
     snapshot: ReactorSnapshot
+    thermal: ThermalSnapshot
     tuning: SimulationTuning
 
 

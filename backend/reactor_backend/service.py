@@ -4,6 +4,7 @@ import time
 from .config import REACTOR_MODEL, SIMULATION_TUNING
 from .engine import ReactorEngine
 from .schemas import CoreGeometry, HistoryPoint, ReactorModel, SimulationState, SimulationTuning
+from .thermal_adapter import ThermalAdapter
 
 
 def to_history_point(time_seconds: float, reactivity_pcm: float, total_flux: float, thermal_power_mw: float) -> HistoryPoint:
@@ -43,9 +44,11 @@ class SimulationService:
             timeScale=SIMULATION_TUNING.time_scale,
         )
         self._engine = ReactorEngine()
+        self._thermal = ThermalAdapter()
         self._running = True
         self._history_accumulator = 0.0
         self._last_wall_time = time.monotonic()
+        self._thermal_state = self._thermal.reset(self._engine.get_snapshot().thermalPowerMw)
         self._history = [self._current_history_point()]
 
     def _current_history_point(self) -> HistoryPoint:
@@ -79,6 +82,10 @@ class SimulationService:
                 simulated_seconds_remaining, SIMULATION_TUNING.integrator_step_seconds
             )
             self._engine.step(step_seconds)
+            self._thermal_state = self._thermal.step(
+                self._engine.get_snapshot().thermalPowerMw,
+                step_seconds,
+            )
             simulated_seconds_remaining -= step_seconds
             self._history_accumulator += step_seconds
 
@@ -92,6 +99,7 @@ class SimulationService:
             model=self._model,
             running=self._running,
             snapshot=self._engine.get_snapshot(),
+            thermal=self._thermal_state,
             tuning=self._tuning,
         )
 
@@ -103,6 +111,7 @@ class SimulationService:
     def reset(self) -> SimulationState:
         with self._lock:
             self._engine.reset()
+            self._thermal_state = self._thermal.reset(self._engine.get_snapshot().thermalPowerMw)
             self._running = True
             self._history_accumulator = 0.0
             self._last_wall_time = time.monotonic()
