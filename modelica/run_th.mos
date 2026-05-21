@@ -1,0 +1,25 @@
+// run_th.mos
+// OpenModelica script for ResearchReactorThermalHydraulicsExample
+// Usage (from /home/pablo/modelica/ReactorKineticsLab/modelica/):
+//   omc run_th.mos
+
+system("mkdir -p build");
+cd("build");
+system("rm -f ResearchReactorThermalHydraulicsExample_res.csv");
+
+loadModel(Modelica);
+getErrorString();
+
+loadFile("../ResearchReactorThermalHydraulics.mo");
+getErrorString();
+
+loadFile("../ResearchReactorThermalHydraulicsExample.mo");
+getErrorString();
+
+simulate(
+  ResearchReactorThermalHydraulicsExample,
+  stopTime    = 6000.0,
+  tolerance   = 1e-6,
+  outputFormat = "csv"
+);
+getErrorString();

@@ -1,0 +1,20 @@
+\contentsline {section}{\numberline {1}Purpose}{2}{}%
+\contentsline {section}{\numberline {2}Why the current prototype overheats}{2}{}%
+\contentsline {section}{\numberline {3}Reactor-scale inputs}{2}{}%
+\contentsline {section}{\numberline {4}Selected operating envelope}{3}{}%
+\contentsline {section}{\numberline {5}Reactor-scale flow and heat-removal estimates}{3}{}%
+\contentsline {subsection}{\numberline {5.1}Required primary mass flow}{3}{}%
+\contentsline {subsection}{\numberline {5.2}Pump duty}{4}{}%
+\contentsline {subsection}{\numberline {5.3}Pool thermal time constant}{4}{}%
+\contentsline {section}{\numberline {6}Core, reflector, and pool abstraction}{4}{}%
+\contentsline {subsection}{\numberline {6.1}Actively cooled region}{4}{}%
+\contentsline {subsection}{\numberline {6.2}Flow direction}{5}{}%
+\contentsline {subsection}{\numberline {6.3}Stagnant reflector and pool}{5}{}%
+\contentsline {section}{\numberline {7}Simplified primary loop}{5}{}%
+\contentsline {subsection}{\numberline {7.1}Topology}{5}{}%
+\contentsline {subsection}{\numberline {7.2}Selected nominal operating parameters}{6}{}%
+\contentsline {section}{\numberline {8}Simplified secondary loop}{6}{}%
+\contentsline {section}{\numberline {9}Modelica implementation targets}{6}{}%
+\contentsline {subsection}{\numberline {9.1}Key scaling parameters}{7}{}%
+\contentsline {subsection}{\numberline {9.2}FMI variable exchange}{7}{}%
+\contentsline {section}{\numberline {10}What is deliberately out of scope}{7}{}%
