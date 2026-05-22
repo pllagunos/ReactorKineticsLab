@@ -186,3 +186,39 @@ def get_core_flux(rod_insertion_percent: float) -> CoreFluxResponse:
         geometry=geometry,
         metadata=metadata,
     )
+
+
+def compute_axial_power_fractions_8(rod_insertion_percent: float) -> list[float]:
+    """Compute 8 equal-height axial node power fractions from the cached diffusion solve.
+
+    Returns 8 fractions ordered **top-to-bottom** (node 1 = inlet at top, as expected
+    by the Modelica DynamicPipe for downflow) that sum to 1.0.
+    """
+    rod_frac = max(0.0, min(1.0, rod_insertion_percent / 100.0))
+    sol, _ = _get_solve(rod_frac, _MESH_DR_CM, _MESH_DZ_CM)
+
+    phi: np.ndarray = sol["phi"]        # (Nr, Nz), normalised to peak = 1
+    r_grid: np.ndarray = sol["r_grid"]  # (Nr,) cm
+
+    # Same radial position as get_core_flux: mid-radius of the fuel annulus
+    r_fuel_mid = (ESTIMATE2_R_INNER_CM + ESTIMATE2_R_FUEL_CM) / 2.0
+    ir_fuel = int(np.argmin(np.abs(r_grid - r_fuel_mid)))
+    axial_phi = phi[ir_fuel, :]  # (Nz,), indexed bottom (z=0) → top (z=H)
+
+    nz = len(axial_phi)
+    fracs_bottom_to_top: list[float] = []
+    for i in range(8):
+        lo = i * nz // 8
+        hi = (i + 1) * nz // 8
+        fracs_bottom_to_top.append(float(np.mean(axial_phi[lo:hi])))
+
+    # Reverse so index 0 = top = inlet for downflow core
+    fracs = fracs_bottom_to_top[::-1]
+
+    total = sum(fracs)
+    if total > 0.0:
+        fracs = [f / total for f in fracs]
+    else:
+        fracs = [0.125] * 8
+
+    return fracs

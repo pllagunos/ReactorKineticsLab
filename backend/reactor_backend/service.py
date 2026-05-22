@@ -2,6 +2,7 @@ import threading
 import time
 
 from .config import REACTOR_MODEL, SIMULATION_TUNING
+from .core_service import compute_axial_power_fractions_8
 from .engine import ReactorEngine
 from .schemas import CoreGeometry, HistoryPoint, ReactorModel, SimulationState, SimulationTuning
 from .thermal_adapter import ThermalAdapter
@@ -82,6 +83,10 @@ class SimulationService:
                 simulated_seconds_remaining, SIMULATION_TUNING.integrator_step_seconds
             )
             self._engine.step(step_seconds)
+            axial_fracs = compute_axial_power_fractions_8(
+                self._engine.get_snapshot().reactivity.rodInsertionPercent
+            )
+            self._thermal.set_axial_fractions(axial_fracs)
             self._thermal_state = self._thermal.step(
                 self._engine.get_snapshot().thermalPowerMw,
                 step_seconds,

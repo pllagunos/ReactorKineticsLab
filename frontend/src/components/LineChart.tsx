@@ -1,12 +1,11 @@
-import type { HistoryPoint } from '../simulation/types'
 import { formatSimTime } from '../utils/format'
 
-type LineChartProps = {
+type LineChartProps<T extends { timeSeconds: number }> = {
   title: string
   subtitle: string
   color: string
-  data: HistoryPoint[]
-  valueAccessor: (point: HistoryPoint) => number
+  data: T[]
+  valueAccessor: (point: T) => number
   valueFormatter: (value: number) => string
 }
 
@@ -57,14 +56,14 @@ function buildChartPath(values: number[]) {
   }
 }
 
-export function LineChart({
+export function LineChart<T extends { timeSeconds: number }>({
   title,
   subtitle,
   color,
   data,
   valueAccessor,
   valueFormatter,
-}: LineChartProps) {
+}: LineChartProps<T>) {
   const values = data.map(valueAccessor)
   const latestValue = values.at(-1) ?? 0
   const { areaPath, linePath, maximum, minimum } = buildChartPath(values)

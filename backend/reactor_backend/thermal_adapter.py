@@ -133,6 +133,11 @@ class ThermalAdapter:
     def get_snapshot(self) -> ThermalSnapshot:
         return self._latest
 
+    def set_axial_fractions(self, fractions: list[float]) -> None:
+        """Update the 8 axial power fractions forwarded to the FMU on the next step."""
+        if len(fractions) == 8:
+            self._axial_profile_values = list(fractions)
+
     def close(self) -> None:
         if self._fmu is not None:
             try:
@@ -235,6 +240,7 @@ class ThermalAdapter:
             massFlowKgPerSecond=self._FALLBACK_MASS_FLOW_KG_S,
             corePressureDropPa=self._FALLBACK_CORE_DP_PA,
             message=message,
+            axialPowerFractions=list(self._axial_profile_values),
         )
 
     def _advance_fallback(self, power_mw: float, dt_seconds: float) -> None:
@@ -261,6 +267,7 @@ class ThermalAdapter:
             massFlowKgPerSecond=self._FALLBACK_MASS_FLOW_KG_S,
             corePressureDropPa=self._FALLBACK_CORE_DP_PA,
             message=self._latest.message,
+            axialPowerFractions=list(self._axial_profile_values),
         )
 
     def _fallback_targets(self, power_mw: float) -> tuple[float, float]:
@@ -364,6 +371,7 @@ class ThermalAdapter:
             massFlowKgPerSecond=values[2],
             corePressureDropPa=values[3],
             message=None,
+            axialPowerFractions=list(self._axial_profile_values),
         )
 
     def _required_variable_ref(self, refs: dict[str, int], name: str) -> int:
@@ -378,4 +386,5 @@ class ThermalAdapter:
             timeSeconds=self._time_seconds,
             powerMw=power_mw,
             message=message,
+            axialPowerFractions=list(self._axial_profile_values),
         )

@@ -6,7 +6,7 @@ import {
   type SetStateAction,
 } from 'react'
 import { simulationApi } from '../simulation/api'
-import type { SimulationState } from '../simulation/types'
+import type { SimulationState, ThermalSnapshot } from '../simulation/types'
 
 function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : 'Unknown backend error'
@@ -15,12 +15,19 @@ function getErrorMessage(error: unknown) {
 export function useReactorSimulation() {
   const [state, setState] = useState<SimulationState | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [thermalHistory, setThermalHistory] = useState<ThermalSnapshot[]>([])
   const pollInFlightRef = useRef(false)
   const actionTokenRef = useRef(0)
 
   const applyState = useCallback((nextState: SimulationState) => {
     setState(nextState)
     setError(null)
+    if (nextState.thermal.available) {
+      setThermalHistory(prev => {
+        const next = [...prev, nextState.thermal]
+        return next.length > 300 ? next.slice(-300) : next
+      })
+    }
   }, [])
 
   const runAction = useCallback(
@@ -115,5 +122,6 @@ export function useReactorSimulation() {
     setRunning,
     snapshot: state?.snapshot ?? null,
     thermal: state?.thermal ?? null,
+    thermalHistory,
   }
 }

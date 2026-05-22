@@ -66,6 +66,7 @@ class ThermalSnapshot(BaseModel):
     massFlowKgPerSecond: Optional[float] = None
     corePressureDropPa: Optional[float] = None
     message: Optional[str] = None
+    axialPowerFractions: list[float] = Field(default_factory=lambda: [0.125] * 8)
 
 
 class HistoryPoint(BaseModel):

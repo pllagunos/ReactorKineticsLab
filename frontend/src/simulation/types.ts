@@ -64,6 +64,7 @@ export type ThermalSnapshot = {
   massFlowKgPerSecond: number | null
   corePressureDropPa: number | null
   message: string | null
+  axialPowerFractions: number[]
 }
 
 export type HistoryPoint = {

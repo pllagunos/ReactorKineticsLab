@@ -1,5 +1,8 @@
+import { CoolingLoopDiagram } from '../components/CoolingLoopDiagram'
+import { LineChart } from '../components/LineChart'
 import { MetricCard } from '../components/MetricCard'
 import { useReactorSimulation } from '../hooks/useReactorSimulation'
+import type { ThermalSnapshot } from '../simulation/types'
 import {
   formatMassFlow,
   formatPowerMw,
@@ -30,7 +33,7 @@ const thermalSourceCopy = {
 } as const
 
 export function ThermalHydraulicsPage() {
-  const { error, loading, model, snapshot, thermal } = useReactorSimulation()
+  const { error, loading, model, snapshot, thermal, thermalHistory } = useReactorSimulation()
 
   if (!snapshot || !model || !thermal) {
     return (
@@ -126,6 +129,43 @@ export function ThermalHydraulicsPage() {
       </section>
 
       {thermal.message ? <p className="alert-banner">{thermal.message}</p> : null}
+
+      <CoolingLoopDiagram thermal={thermal} />
+
+      <section className="th-charts-grid">
+        <LineChart<ThermalSnapshot>
+          title="Core inlet temperature"
+          subtitle="Primary coolant temperature entering the core — target 25 °C"
+          color="#38bdf8"
+          data={thermalHistory}
+          valueAccessor={t => t.inletTemperatureK ?? 0}
+          valueFormatter={k => formatTemperatureK(k)}
+        />
+        <LineChart<ThermalSnapshot>
+          title="Core outlet temperature"
+          subtitle="Primary coolant temperature exiting the core — nominal 45 °C"
+          color="#f59e0b"
+          data={thermalHistory}
+          valueAccessor={t => t.outletTemperatureK ?? 0}
+          valueFormatter={k => formatTemperatureK(k)}
+        />
+        <LineChart<ThermalSnapshot>
+          title="Primary mass flow"
+          subtitle="Forced-circulation D₂O flow rate through the core channel"
+          color="#4ade80"
+          data={thermalHistory}
+          valueAccessor={t => t.massFlowKgPerSecond ?? 0}
+          valueFormatter={v => formatMassFlow(v)}
+        />
+        <LineChart<ThermalSnapshot>
+          title="Core pressure drop"
+          subtitle="Differential pressure across the effective core channel (inlet − outlet)"
+          color="#a78bfa"
+          data={thermalHistory}
+          valueAccessor={t => t.corePressureDropPa ?? 0}
+          valueFormatter={v => formatPressureDropPa(v)}
+        />
+      </section>
 
       <section className="notes-grid">
         <article className="panel note-panel">
