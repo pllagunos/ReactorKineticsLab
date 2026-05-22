@@ -43,6 +43,7 @@ class SimulationTuningConfig:
     history_point_limit: int
     history_sample_seconds: float
     integrator_step_seconds: float
+    thermal_update_seconds: float
     max_wall_step_seconds: float
     poll_interval_ms: int
     time_scale: float
@@ -82,6 +83,7 @@ SIMULATION_TUNING = SimulationTuningConfig(
     history_point_limit=240,
     history_sample_seconds=0.25,
     integrator_step_seconds=0.02,
+    thermal_update_seconds=0.1,
     max_wall_step_seconds=0.2,
     poll_interval_ms=100,
     time_scale=8,

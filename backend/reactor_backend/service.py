@@ -40,6 +40,7 @@ class SimulationService:
             historyPointLimit=SIMULATION_TUNING.history_point_limit,
             historySampleSeconds=SIMULATION_TUNING.history_sample_seconds,
             integratorStepSeconds=SIMULATION_TUNING.integrator_step_seconds,
+            thermalUpdateSeconds=SIMULATION_TUNING.thermal_update_seconds,
             maxWallStepSeconds=SIMULATION_TUNING.max_wall_step_seconds,
             pollIntervalMs=SIMULATION_TUNING.poll_interval_ms,
             timeScale=SIMULATION_TUNING.time_scale,
@@ -65,6 +66,39 @@ class SimulationService:
         self._history.append(self._current_history_point())
         self._history = self._history[-SIMULATION_TUNING.history_point_limit :]
 
+    def _advance_thermal_batch(
+        self,
+        fmu_power_mw: float,
+        reported_power_mw: float,
+        rod_insertion_percent: float,
+        dt_seconds: float,
+    ) -> None:
+        if dt_seconds < 0.0:
+            return
+
+        self._thermal.set_axial_fractions(
+            compute_axial_power_fractions_8(rod_insertion_percent)
+        )
+        self._thermal_state = self._thermal.step(
+            fmu_power_mw,
+            dt_seconds,
+            reported_power_mw=reported_power_mw,
+        )
+
+    def _sync_thermal_to_current_snapshot_locked(self) -> None:
+        snapshot = self._engine.get_snapshot()
+        try:
+            self._advance_thermal_batch(
+                snapshot.thermalPowerMw,
+                snapshot.thermalPowerMw,
+                snapshot.reactivity.rodInsertionPercent,
+                0.0,
+            )
+        except Exception:
+            # Keep control actions (rod moves/scram) available even if the
+            # thermal refresh path is temporarily unavailable.
+            self._thermal_state = self._thermal.get_snapshot()
+
     def _advance_locked(self) -> None:
         now = time.monotonic()
         elapsed_wall_seconds = now - self._last_wall_time
@@ -77,26 +111,68 @@ class SimulationService:
             elapsed_wall_seconds, SIMULATION_TUNING.max_wall_step_seconds
         )
         simulated_seconds_remaining = elapsed_wall_seconds * SIMULATION_TUNING.time_scale
+        snapshot = self._engine.get_snapshot()
+        thermal_batch_seconds = 0.0
+        thermal_batch_power_mw = snapshot.thermalPowerMw
+        thermal_batch_power_mw_seconds = 0.0
+        thermal_batch_rod_insertion_percent = snapshot.reactivity.rodInsertionPercent
+        thermal_batch_scram_latched = snapshot.scramLatched
+        thermal_update_seconds = max(
+            SIMULATION_TUNING.thermal_update_seconds,
+            SIMULATION_TUNING.integrator_step_seconds,
+        )
+
+        def flush_thermal_batch() -> None:
+            nonlocal thermal_batch_seconds
+            nonlocal thermal_batch_power_mw
+            nonlocal thermal_batch_power_mw_seconds
+
+            if thermal_batch_seconds <= 0.0:
+                return
+
+            self._advance_thermal_batch(
+                thermal_batch_power_mw_seconds / thermal_batch_seconds,
+                thermal_batch_power_mw,
+                thermal_batch_rod_insertion_percent,
+                thermal_batch_seconds,
+            )
+            thermal_batch_seconds = 0.0
+            thermal_batch_power_mw_seconds = 0.0
 
         while simulated_seconds_remaining > 0:
             step_seconds = min(
                 simulated_seconds_remaining, SIMULATION_TUNING.integrator_step_seconds
             )
             self._engine.step(step_seconds)
-            axial_fracs = compute_axial_power_fractions_8(
-                self._engine.get_snapshot().reactivity.rodInsertionPercent
+            snapshot = self._engine.get_snapshot()
+            thermal_state_changed = (
+                snapshot.reactivity.rodInsertionPercent
+                != thermal_batch_rod_insertion_percent
+                or snapshot.scramLatched != thermal_batch_scram_latched
             )
-            self._thermal.set_axial_fractions(axial_fracs)
-            self._thermal_state = self._thermal.step(
-                self._engine.get_snapshot().thermalPowerMw,
-                step_seconds,
-            )
+
+            if thermal_state_changed:
+                flush_thermal_batch()
+                thermal_batch_rod_insertion_percent = (
+                    snapshot.reactivity.rodInsertionPercent
+                )
+                thermal_batch_scram_latched = snapshot.scramLatched
+
+            thermal_batch_seconds += step_seconds
+            thermal_batch_power_mw = snapshot.thermalPowerMw
+            thermal_batch_power_mw_seconds += snapshot.thermalPowerMw * step_seconds
+
+            if thermal_batch_seconds >= thermal_update_seconds:
+                flush_thermal_batch()
+
             simulated_seconds_remaining -= step_seconds
             self._history_accumulator += step_seconds
 
             if self._history_accumulator >= SIMULATION_TUNING.history_sample_seconds:
                 self._history_accumulator -= SIMULATION_TUNING.history_sample_seconds
                 self._push_history_point()
+
+        flush_thermal_batch()
 
     def _build_state_locked(self) -> SimulationState:
         return SimulationState(
@@ -127,6 +203,7 @@ class SimulationService:
         with self._lock:
             self._advance_locked()
             self._engine.scram()
+            self._sync_thermal_to_current_snapshot_locked()
             self._push_history_point()
             return self._build_state_locked()
 
@@ -134,6 +211,7 @@ class SimulationService:
         with self._lock:
             self._advance_locked()
             self._engine.set_rod_insertion(insertion_percent)
+            self._sync_thermal_to_current_snapshot_locked()
             return self._build_state_locked()
 
     def set_running(self, running: bool) -> SimulationState:

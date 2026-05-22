@@ -29,6 +29,7 @@ class SimulationTuning(BaseModel):
     historyPointLimit: int
     historySampleSeconds: float
     integratorStepSeconds: float
+    thermalUpdateSeconds: float
     maxWallStepSeconds: float
     pollIntervalMs: int
     timeScale: float

@@ -27,6 +27,7 @@ export type SimulationTuning = {
   historyPointLimit: number
   historySampleSeconds: number
   integratorStepSeconds: number
+  thermalUpdateSeconds: number
   maxWallStepSeconds: number
   pollIntervalMs: number
   timeScale: number

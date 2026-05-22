@@ -257,3 +257,25 @@ Now that the physics layer is in Python, natural next steps are:
   - could also use standard point kinetics but rod insertion reactivity be calculated via diffusion?
 - integrate Modelica FMU for simple systems thermal hydraulics
 - The **prompt generation time** $\Lambda$ could benefite from an adjoint solve i think (or better, an OpenMC calculation so you get: multigroup coefficients, beta_eff and lambda for your 1 or 2 group diffusion simulation model)
+
+- FMU build handlded outside of python and frozen (not gitignored)? or handled by a script, like with bun run backend:install?
+
+- architecture documentation:
+
+i.e for python thermal_adapter.py you mentioned (older arch perhaps)
+
+FMU build/export management
+In thermal_adapter.py:275, _ensure_fmu() decides whether to reuse an existing FMU or run omc to export a fresh one.
+In thermal_adapter.py:309, _build_export_script() generates the .mos script for OpenModelica.
+In thermal_adapter.py:323, _fmu_has_expected_flags() checks that the FMU was built with the expected solver flags.
+
+FMU runtime lifecycle
+In thermal_adapter.py:149, _ensure_instance() loads the FMU metadata, finds variable references, extracts the FMU zip, instantiates the co-simulation slave, enters initialization mode, pushes initial inputs, exits initialization, and reads initial outputs.
+In thermal_adapter.py:342, _set_inputs() writes totalPower and axialPowerFractions.
+In thermal_adapter.py:349, _read_outputs() reads T_inlet, T_outlet, massFlow, and dp_core.
+In thermal_adapter.py:141, close() terminates the FMU instance, frees it, and deletes the extracted working directory.
+
+Failure containment / fallback model
+In thermal_adapter.py:218, _activate_fallback() switches to a simple surrogate thermal model if FMU init or stepping fails.
+In thermal_adapter.py:246, _advance_fallback() advances that surrogate with a first-order temperature response.
+In thermal_adapter.py:382, _unavailable_snapshot() packages an error state for the API.

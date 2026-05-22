@@ -88,21 +88,32 @@ class ThermalAdapter:
                 )
         return self._latest
 
-    def step(self, power_mw: float, dt_seconds: float) -> ThermalSnapshot:
+    def step(
+        self,
+        power_mw: float,
+        dt_seconds: float,
+        reported_power_mw: Optional[float] = None,
+    ) -> ThermalSnapshot:
+        snapshot_power_mw = power_mw if reported_power_mw is None else reported_power_mw
         if dt_seconds < 0:
             return self._unavailable_snapshot(
-                power_mw=power_mw,
+                power_mw=snapshot_power_mw,
                 message="Thermal adapter received a negative time step.",
             )
 
         if self._fallback_active:
-            self._advance_fallback(power_mw, dt_seconds)
+            self._advance_fallback(
+                power_mw,
+                dt_seconds,
+                reported_power_mw=snapshot_power_mw,
+            )
             return self._latest
 
         if not self._ensure_instance(power_mw):
             self._activate_fallback(
                 power_mw=power_mw,
                 message=self._latest.message or "Using fallback thermal model.",
+                reported_power_mw=snapshot_power_mw,
             )
             return self._latest
 
@@ -115,7 +126,7 @@ class ThermalAdapter:
                     communicationStepSize=dt_seconds,
                 )
                 self._time_seconds += dt_seconds
-            self._latest = self._read_outputs(power_mw)
+            self._latest = self._read_outputs(snapshot_power_mw)
         except Exception as exc:
             prior_inlet = self._latest.inletTemperatureK
             prior_outlet = self._latest.outletTemperatureK
@@ -125,8 +136,13 @@ class ThermalAdapter:
                 message=f"Thermal FMU step failed; using fallback thermal model: {exc}",
                 inlet_temperature_k=prior_inlet,
                 outlet_temperature_k=prior_outlet,
+                reported_power_mw=snapshot_power_mw,
             )
-            self._advance_fallback(power_mw, dt_seconds)
+            self._advance_fallback(
+                power_mw,
+                dt_seconds,
+                reported_power_mw=snapshot_power_mw,
+            )
 
         return self._latest
 
@@ -194,17 +210,18 @@ class ThermalAdapter:
             self._axial_profile_values = [1.0 / len(self._vr_axial_profile)] * len(self._vr_axial_profile)
 
             self._unzip_dir = extract(str(fmu_path))
-            self._fmu = FMU2Slave(
+            fmu = FMU2Slave(
                 guid=model_description.guid,
                 unzipDirectory=self._unzip_dir,
                 modelIdentifier=model_description.coSimulation.modelIdentifier,
                 instanceName="reactor_th_adapter",
             )
-            self._fmu.instantiate()
-            self._fmu.setupExperiment(startTime=0.0)
-            self._fmu.enterInitializationMode()
+            self._fmu = fmu
+            fmu.instantiate()
+            fmu.setupExperiment(startTime=0.0)
+            fmu.enterInitializationMode()
             self._set_inputs(initial_power_mw)
-            self._fmu.exitInitializationMode()
+            fmu.exitInitializationMode()
             self._latest = self._read_outputs(initial_power_mw)
             return True
         except Exception as exc:
@@ -221,7 +238,9 @@ class ThermalAdapter:
         message: str,
         inlet_temperature_k: Optional[float] = None,
         outlet_temperature_k: Optional[float] = None,
+        reported_power_mw: Optional[float] = None,
     ) -> None:
+        snapshot_power_mw = power_mw if reported_power_mw is None else reported_power_mw
         self._fallback_active = True
         target_inlet, target_outlet = self._fallback_targets(power_mw)
         self._fallback_inlet_temperature_k = (
@@ -234,7 +253,7 @@ class ThermalAdapter:
             available=True,
             source="fallback",
             timeSeconds=self._time_seconds,
-            powerMw=power_mw,
+            powerMw=snapshot_power_mw,
             inletTemperatureK=self._fallback_inlet_temperature_k,
             outletTemperatureK=self._fallback_outlet_temperature_k,
             massFlowKgPerSecond=self._FALLBACK_MASS_FLOW_KG_S,
@@ -243,7 +262,13 @@ class ThermalAdapter:
             axialPowerFractions=list(self._axial_profile_values),
         )
 
-    def _advance_fallback(self, power_mw: float, dt_seconds: float) -> None:
+    def _advance_fallback(
+        self,
+        power_mw: float,
+        dt_seconds: float,
+        reported_power_mw: Optional[float] = None,
+    ) -> None:
+        snapshot_power_mw = power_mw if reported_power_mw is None else reported_power_mw
         target_inlet, target_outlet = self._fallback_targets(power_mw)
         if dt_seconds > 0:
             alpha = 1.0 - 2.718281828459045 ** (
@@ -261,7 +286,7 @@ class ThermalAdapter:
             available=True,
             source="fallback",
             timeSeconds=self._time_seconds,
-            powerMw=power_mw,
+            powerMw=snapshot_power_mw,
             inletTemperatureK=self._fallback_inlet_temperature_k,
             outletTemperatureK=self._fallback_outlet_temperature_k,
             massFlowKgPerSecond=self._FALLBACK_MASS_FLOW_KG_S,
