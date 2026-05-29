@@ -6,14 +6,58 @@ from typing import Any
 
 import openmc
 
+from concentric_fuel import (
+    ConcentricElementParameters,
+    build_fuel_element_universe as build_concentric_fuel_element_universe,
+    fuel_element_total_height_cm as concentric_fuel_element_total_height_cm,
+    make_default_materials as make_concentric_default_materials,
+)
 from fuel_element import (
-    build_fuel_element_universe,
+    build_fuel_element_universe as build_involute_fuel_element_universe,
     default_parameters as default_fuel_element_parameters,
-    fuel_element_total_height_cm,
-    make_default_materials,
+    fuel_element_total_height_cm as involute_fuel_element_total_height_cm,
+    make_default_materials as make_involute_default_materials,
 )
 from involutes import InvoluteElementParameters
 from ploting import export_and_render_plots, reactor_plots
+
+
+FuelElementParameters = InvoluteElementParameters | ConcentricElementParameters
+
+
+def _fuel_element_total_height_cm(fuel_element: FuelElementParameters) -> float:
+    if isinstance(fuel_element, ConcentricElementParameters):
+        return concentric_fuel_element_total_height_cm(fuel_element)
+    return involute_fuel_element_total_height_cm(fuel_element)
+
+
+def _make_fuel_materials(
+    fuel_element: FuelElementParameters,
+) -> tuple[openmc.Materials, dict[str, openmc.Material]]:
+    if isinstance(fuel_element, ConcentricElementParameters):
+        return make_concentric_default_materials(fuel_element)
+    return make_involute_default_materials(fuel_element)
+
+
+def _build_fuel_universe(
+    fuel_element: FuelElementParameters,
+    material_map: dict[str, openmc.Material],
+    rod_insertion: float,
+    external_boundary_type: str | None,
+) -> tuple[openmc.Universe, dict[str, Any]]:
+    if isinstance(fuel_element, ConcentricElementParameters):
+        return build_concentric_fuel_element_universe(
+            fuel_element,
+            material_map,
+            rod_insertion=rod_insertion,
+            external_boundary_type=external_boundary_type,
+        )
+    return build_involute_fuel_element_universe(
+        fuel_element,
+        material_map,
+        rod_insertion=rod_insertion,
+        external_boundary_type=external_boundary_type,
+    )
 
 
 @dataclass(frozen=True)
@@ -30,21 +74,23 @@ class ReactorTankParameters:
 
 
 def validate_reactor_tanks(
-    fuel_element: InvoluteElementParameters,
+    fuel_element: FuelElementParameters,
     tanks: ReactorTankParameters,
 ) -> None:
     if tanks.d2o_tank_radius_cm <= fuel_element.outer_radius_cm:
         raise ValueError("d2o_tank_radius_cm must be larger than the fuel element outer radius")
     if tanks.h2o_tank_radius_cm <= tanks.d2o_tank_radius_cm:
         raise ValueError("h2o_tank_radius_cm must be larger than d2o_tank_radius_cm")
-    if tanks.h_d2o_tank_cm < fuel_element_total_height_cm(fuel_element):
+    if tanks.h_d2o_tank_cm < _fuel_element_total_height_cm(fuel_element):
         raise ValueError("h_d2o_tank_cm must be at least as tall as the fuel element stack")
     if tanks.h_h2o_tank_cm < tanks.h_d2o_tank_cm:
         raise ValueError("h_h2o_tank_cm must be at least as tall as h_d2o_tank_cm")
 
 
-def make_reactor_materials() -> tuple[openmc.Materials, dict[str, openmc.Material]]:
-    materials, material_map = make_default_materials()
+def make_reactor_materials(
+    fuel_element: FuelElementParameters,
+) -> tuple[openmc.Materials, dict[str, openmc.Material]]:
+    materials, material_map = _make_fuel_materials(fuel_element)
 
     light_water = openmc.Material(name="Light water tank")
     light_water.set_density("g/cm3", 0.997)
@@ -59,23 +105,23 @@ def make_reactor_materials() -> tuple[openmc.Materials, dict[str, openmc.Materia
 
 
 def build_reactor_universe(
-    fuel_element: InvoluteElementParameters,
+    fuel_element: FuelElementParameters,
     tanks: ReactorTankParameters,
     rod_insertion: float = 0.0,
     material_map: dict[str, openmc.Material] | None = None,
 ) -> tuple[openmc.Universe, dict[str, Any]]:
     validate_reactor_tanks(fuel_element, tanks)
     if material_map is None:
-        _, material_map = make_reactor_materials()
+        _, material_map = make_reactor_materials(fuel_element)
 
-    fuel_universe, fuel_metadata = build_fuel_element_universe(
+    fuel_universe, fuel_metadata = _build_fuel_universe(
         fuel_element,
         material_map,
         rod_insertion=rod_insertion,
         external_boundary_type=None,
     )
 
-    fuel_total_half = 0.5 * fuel_element_total_height_cm(fuel_element)
+    fuel_total_half = 0.5 * _fuel_element_total_height_cm(fuel_element)
     d2o_half = 0.5 * tanks.h_d2o_tank_cm
     total_half = 0.5 * tanks.h_h2o_tank_cm
 
@@ -115,11 +161,11 @@ def build_reactor_universe(
 
 
 def build_reactor_model(
-    fuel_element: InvoluteElementParameters,
+    fuel_element: FuelElementParameters,
     tanks: ReactorTankParameters,
     rod_insertion: float = 0.0,
 ) -> tuple[openmc.Model, dict[str, Any]]:
-    materials, material_map = make_reactor_materials()
+    materials, material_map = make_reactor_materials(fuel_element)
     universe, metadata = build_reactor_universe(
         fuel_element,
         tanks,
@@ -133,7 +179,7 @@ def build_reactor_model(
 
 def export_reactor_artifacts(
     model: openmc.Model,
-    fuel_element: InvoluteElementParameters,
+    fuel_element: FuelElementParameters,
     tanks: ReactorTankParameters,
     output_dir: Path,
     openmc_exec: str | None = None,

@@ -10,16 +10,14 @@ import openmc
 from involutes import (
     InvoluteElementParameters,
     build_parameter_report,
+    fuel_mass_kg as involute_fuel_mass_kg,
     involute_strip_points,
     plate_cells,
     spiral_summary,
     validate_parameters,
 )
-from ploting import fuel_element_plots
 from ploting import export_and_render_plots
-
-
-DEFAULT_FUEL_DENSITY_G_PER_CM3 = 19.05
+from ploting import fuel_element_plots
 
 
 def _z_plane(z0: float, boundary_type: str | None = None) -> openmc.ZPlane:
@@ -36,30 +34,21 @@ def fuel_element_total_height_cm(parameters: InvoluteElementParameters) -> float
     return parameters.lower_plenum_cm + parameters.h_active_cm + parameters.upper_plenum_cm
 
 
-def fuel_volume_cm3(parameters: InvoluteElementParameters) -> float:
-    summary = spiral_summary(parameters)
-    single_plate_length_cm = float(summary["single_plate_length_cm"])
-    return (
-        parameters.plate_count
-        * parameters.plate_thickness_cm
-        * single_plate_length_cm
-        * parameters.h_active_cm
-    )
+def fuel_mass_kg(parameters: InvoluteElementParameters) -> float:
+    return involute_fuel_mass_kg(parameters)
 
 
-def fuel_mass_kg(
+def make_default_materials(
     parameters: InvoluteElementParameters,
-    density_g_per_cm3: float = DEFAULT_FUEL_DENSITY_G_PER_CM3,
-) -> float:
-    if density_g_per_cm3 <= 0.0:
-        raise ValueError("density_g_per_cm3 must be positive")
-    return fuel_volume_cm3(parameters) * density_g_per_cm3 / 1000.0
-
-
-def make_default_materials() -> tuple[openmc.Materials, dict[str, openmc.Material]]:
-    fuel = openmc.Material(name="Natural uranium metal")
-    fuel.set_density("g/cm3", DEFAULT_FUEL_DENSITY_G_PER_CM3)
-    fuel.add_element("U", 1.0, enrichment=20.0)
+) -> tuple[openmc.Materials, dict[str, openmc.Material]]:
+    # fuel = openmc.Material(name="Uranium metal fuel")
+    # fuel = openmc.Material(name="Uranium dioxide fuel")
+    fuel = openmc.Material(name="U3Si2 fuel")
+    fuel.set_density("g/cm3", parameters.fuel_density_g_per_cm3)
+    # fuel.add_element("U", 1.0, enrichment=parameters.fuel_enrichment_wt_pct)
+    # fuel.add_element("O", 2.0)
+    fuel.add_element("U", 3.0, enrichment=parameters.fuel_enrichment_wt_pct)
+    fuel.add_element("Si", 2.0)
     fuel.temperature = 600.0
 
     heavy_water = openmc.Material(name="Heavy water moderator")
@@ -159,7 +148,7 @@ def build_fuel_element_model(
     parameters: InvoluteElementParameters,
     rod_insertion: float = 0.0,
 ) -> tuple[openmc.Model, dict[str, Any]]:
-    materials, material_map = make_default_materials()
+    materials, material_map = make_default_materials(parameters)
     geometry, metadata = build_fuel_element_geometry(
         parameters,
         material_map,
@@ -257,7 +246,9 @@ def default_parameters() -> InvoluteElementParameters:
         lower_plenum_cm=50.0,
         upper_plenum_cm=50.0,
         segments_per_plate=24,
-        base_radius_cm=18.0,
+        base_radius_cm=None,
+        fuel_density_g_per_cm3=19.05,
+        fuel_enrichment_wt_pct=0.7,
     )
 
 

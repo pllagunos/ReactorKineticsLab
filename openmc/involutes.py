@@ -20,6 +20,8 @@ class InvoluteElementParameters:
     upper_plenum_cm: float = 50.0
     segments_per_plate: int = 14
     base_radius_cm: float | None = None
+    fuel_density_g_per_cm3: float = 19.05
+    fuel_enrichment_wt_pct: float = 0.7
 
     def resolved_base_radius_cm(self) -> float:
         if self.base_radius_cm is not None:
@@ -34,8 +36,19 @@ class InvoluteElementParameters:
         return values
 
 
+def circumferential_pitch_cm(parameters: InvoluteElementParameters) -> float:
+    return parameters.plate_thickness_cm + parameters.coolant_gap_cm
+
+
+def max_feasible_coolant_gap_cm(parameters: InvoluteElementParameters) -> float:
+    return 2.0 * np.pi * parameters.inner_radius_cm / parameters.plate_count - parameters.plate_thickness_cm
+
+
+def min_required_inner_radius_cm(parameters: InvoluteElementParameters) -> float:
+    return parameters.plate_count * circumferential_pitch_cm(parameters) / (2.0 * np.pi)
+
+
 def validate_parameters(parameters: InvoluteElementParameters) -> None:
-    base_radius_cm = parameters.resolved_base_radius_cm()
     if parameters.plate_count < 1:
         raise ValueError("plate_count must be positive")
     if parameters.segments_per_plate < 2:
@@ -44,10 +57,6 @@ def validate_parameters(parameters: InvoluteElementParameters) -> None:
         raise ValueError("plate_thickness_cm must be positive")
     if parameters.coolant_gap_cm <= 0.0:
         raise ValueError("coolant_gap_cm must be positive")
-    if base_radius_cm <= 0.0:
-        raise ValueError("base_radius_cm must be positive")
-    if base_radius_cm >= parameters.inner_radius_cm:
-        raise ValueError("base_radius_cm must remain inside the central moderator hole")
     if parameters.inner_radius_cm >= parameters.outer_radius_cm:
         raise ValueError("inner_radius_cm must be smaller than outer_radius_cm")
     if parameters.control_rod_radius_cm <= 0.0:
@@ -58,6 +67,28 @@ def validate_parameters(parameters: InvoluteElementParameters) -> None:
         raise ValueError("h_active_cm must be positive")
     if parameters.lower_plenum_cm < 0.0 or parameters.upper_plenum_cm < 0.0:
         raise ValueError("plenum heights cannot be negative")
+    if parameters.fuel_density_g_per_cm3 <= 0.0:
+        raise ValueError("fuel_density_g_per_cm3 must be positive")
+    if not 0.0 < parameters.fuel_enrichment_wt_pct < 100.0:
+        raise ValueError("fuel_enrichment_wt_pct must be between 0 and 100")
+
+    min_inner_radius_cm = min_required_inner_radius_cm(parameters)
+    max_gap_cm = max_feasible_coolant_gap_cm(parameters)
+    if min_inner_radius_cm >= parameters.inner_radius_cm:
+        raise ValueError(
+            "Infeasible involute plate request for the specified plate_count, plate_thickness_cm, "
+            f"and coolant_gap_cm. With plate_count={parameters.plate_count}, "
+            f"plate_thickness_cm={parameters.plate_thickness_cm:.6g} cm, and "
+            f"inner_radius_cm={parameters.inner_radius_cm:.6g} cm, the maximum feasible coolant gap is "
+            f"{max_gap_cm:.6g} cm. To keep coolant_gap_cm={parameters.coolant_gap_cm:.6g} cm, "
+            f"inner_radius_cm must be at least {min_inner_radius_cm:.6g} cm."
+        )
+
+    base_radius_cm = parameters.resolved_base_radius_cm()
+    if base_radius_cm <= 0.0:
+        raise ValueError("base_radius_cm must be positive")
+    if base_radius_cm >= parameters.inner_radius_cm:
+        raise ValueError("base_radius_cm must remain inside the central moderator hole")
 
 
 def involute_theta_bounds(parameters: InvoluteElementParameters) -> tuple[float, float]:
@@ -151,6 +182,23 @@ def plate_cells(
     return cells, active_union
 
 
+def fuel_volume_cm3(parameters: InvoluteElementParameters) -> float:
+    validate_parameters(parameters)
+    base_radius_cm = parameters.resolved_base_radius_cm()
+    theta_inner, theta_outer = involute_theta_bounds(parameters)
+    arc_length = 0.5 * base_radius_cm * (
+        theta_outer * np.sqrt(1.0 + theta_outer**2)
+        + np.arcsinh(theta_outer)
+        - theta_inner * np.sqrt(1.0 + theta_inner**2)
+        - np.arcsinh(theta_inner)
+    )
+    return parameters.plate_count * arc_length * parameters.plate_thickness_cm * parameters.h_active_cm
+
+
+def fuel_mass_kg(parameters: InvoluteElementParameters) -> float:
+    return fuel_volume_cm3(parameters) * parameters.fuel_density_g_per_cm3 / 1000.0
+
+
 def spiral_summary(parameters: InvoluteElementParameters) -> dict[str, float | int]:
     validate_parameters(parameters)
     base_radius_cm = parameters.resolved_base_radius_cm()
@@ -163,6 +211,7 @@ def spiral_summary(parameters: InvoluteElementParameters) -> dict[str, float | i
     )
     uranium_area_cm2 = parameters.plate_count * arc_length * parameters.plate_thickness_cm
     annulus_area_cm2 = np.pi * (parameters.outer_radius_cm**2 - parameters.inner_radius_cm**2)
+    uranium_volume_cm3 = fuel_volume_cm3(parameters)
     return {
         "plate_count": parameters.plate_count,
         "base_radius_cm": base_radius_cm,
@@ -170,6 +219,8 @@ def spiral_summary(parameters: InvoluteElementParameters) -> dict[str, float | i
         "theta_outer": theta_outer,
         "single_plate_length_cm": arc_length,
         "uranium_area_fraction": uranium_area_cm2 / annulus_area_cm2,
+        "uranium_volume_cm3": uranium_volume_cm3,
+        "uranium_mass_kg": uranium_volume_cm3 * parameters.fuel_density_g_per_cm3 / 1000.0,
     }
 
 
@@ -183,7 +234,12 @@ __all__ = [
     "InvoluteElementParameters",
     "all_plate_regions",
     "build_parameter_report",
+    "circumferential_pitch_cm",
+    "fuel_mass_kg",
+    "fuel_volume_cm3",
     "involute_strip_points",
+    "max_feasible_coolant_gap_cm",
+    "min_required_inner_radius_cm",
     "plate_polygon_points",
     "plate_cells",
     "plate_region",

@@ -262,6 +262,10 @@ Now that the physics layer is in Python, natural next steps are:
 
 - architecture documentation:
 
+###
+for openmc scripts, explaining architecture and functionality of fuel_element.py, involutes.py, ploting.py and reactor_geometry.py. Specially how its object oriented nature and dataclasses interact between each other. But also how they implement what they do (with special emphasis in how the involute plates are generated as polygons from sin,cos curves and transformations). Include also how the frm2_nat.ipynb notebook uses them.
+
+###
 i.e for python thermal_adapter.py you mentioned (older arch perhaps)
 
 FMU build/export management
@@ -279,3 +283,17 @@ Failure containment / fallback model
 In thermal_adapter.py:218, _activate_fallback() switches to a simple surrogate thermal model if FMU init or stepping fails.
 In thermal_adapter.py:246, _advance_fallback() advances that surrogate with a first-order temperature response.
 In thermal_adapter.py:382, _unavailable_snapshot() packages an error state for the API.
+
+
+###
+-  gave k_eff > 1:
+-  plate_count=60, 40
+-  plate_thickness_cm=0.5, 0.3
+-  coolant_gap_cm=8.0, 4.0
+-  inner_radius_cm=100.0, 80.0
+-  outer_radius_cm=300.0, 345.0
+-  h_active_cm=350.0, 300
+- d2o_tank_radius_cm=862.5, 350.0,
+- h2o_tank_radius_cm=1121.25, 500.0,
+- h_d2o_tank_cm=640.0,720.0,
+- h_h2o_tank_cm=840.0, 1000.0,
