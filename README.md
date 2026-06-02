@@ -1,8 +1,8 @@
-# Reactor Web App
+# Reactor Kinetics Lab
 
-A localhost reactor simulator with a **React + Bun frontend** and a **Python backend** for the reactor physics.
+A local reactor simulator modeled with montecarlo OpenMC which runs a point kinetics and diffusion solver coupled to a modelica based thermal-hydraulics module.
 
-The current version models a simplified **heavy-water-moderated annular core** with one operator control: **control rod insertion**. The browser dashboard shows how **reactivity**, **total neutron flux**, and **thermal power** evolve over time, while the transient is solved in Python.
+The current version models a simplified **heavy-water-moderated natural uranium fueled core** with one operator control: **control rod insertion**. The browser dashboard shows how **reactivity**, **total neutron flux**, **thermal power** and **coolant temperatures** evolve over time.
 
 ## What the app does
 
@@ -133,19 +133,16 @@ The frontend treats the backend as the **source of truth** for:
 
 ## 1. Core model
 
-The reactor is treated as a simplified **annular core** (Estimate 2 geometry from `theory/reactorModel.ipynb`):
+See `theory` for more details.
 
-- inner radius: **0.8 m**
-- outer radius: **3.456 m** (R_fuel = 345.6 cm from 2D critical search)
-- active height: **6.912 m** (aspect ratio ≈ 1 for the full annular zone)
-
-Heavy water moderation is a **fixed assumption** in this version.
+- Narrative: initial homogeneous core - the simplified **annular core** (Estimate 2 geometry from `theory/reactorModel.ipynb`); then an openmc `openmc` workflow where we first realize issues with the diffusion model and then generate better fidelity cores starting with a frm2 style involute core and ending with a concentric core.
+- initial problems where the uneconomical size of the core, unrealistic homogeneous core.
 
 ## 2. Reactivity model
 
-The only operator input is **rod insertion percent**.
+The only operator input is **rod insertion percent**. --> add flow rate in primary and secondary later!.
 
-Rod position is converted into reactivity using a **2D-calibrated rod-worth table** derived from `theory/reactorModel.ipynb`:
+Rod position is converted into reactivity using a **2D-calibrated rod-worth table** derived from `theory/reactorModel.ipynb`: --> need new rod-wroth table for new concentric core.
 
 - The clean, unrodded core is slightly supercritical in the 2D solve: `k_eff ≈ 1.000395` (`ρ ≈ +39.4 pcm`).
 - The table stores **rod-only** `Δρ(x)` at 11 points (x = 0.0 to 1.0 in steps of 0.1) from a 2D r-z finite-difference one-group diffusion eigenvalue scan.
@@ -155,16 +152,6 @@ Rod position is converted into reactivity using a **2D-calibrated rod-worth tabl
   - equivalent radius `r_rod = 50 cm`
   - effective absorber increment `ΔΣ_a,max = 0.25 cm⁻¹` (one-group homogenized value)
 
-Current calibration values (frozen from the notebook):
-
-| x (insertion fraction) | Δρ (pcm) |
-|---|---|
-| 0.0 | 0.0 (reference) |
-| 0.1 | −4.7 |
-| 0.2 | −16.3 |
-| 0.5 | −84.7 |
-| 1.0 | −159.6 |
-
 Derived operating points:
 
 - critical insertion: **~32%**
@@ -173,15 +160,16 @@ Derived operating points:
 
 The dashboard shows reactivity in **pcm**, while the kinetics solver uses **delta-k/k** internally:
 
-- `1 pcm = 1e-5 delta-k/k`
 - `beta_eff = 0.00651`
 - `beta_eff = 651 pcm`
+
+--> change to MGXS beta's!
 
 ## 3. Point-kinetics solver
 
 The transient uses:
 
-- **6 delayed neutron groups**
+- **6 delayed neutron groups** --> from MGXS, explain MGXS workflow
 - `beta_eff = 0.00651`
 - neutron generation time: **5e-4 s**
 
@@ -236,31 +224,28 @@ When SCRAM is latched:
 
 ## What is simplified
 
-This is still an educational first slice, not a full reactor code.
-
-Intentional simplifications:
+This is still an educational first slice. Intentional simplifications:
 
 - one effective rod bank instead of a full control system
 - no thermal-hydraulic feedback
 - no xenon, temperature coefficients, void coefficients, or burnup
-- fixed heavy-water moderation assumptions
 - flux and power are scaled from nominal values
-- point kinetics only, with no spatial flux solution
 
-## Likely next steps
+## Next steps
 
 Now that the physics layer is in Python, natural next steps are:
 
-- see `theory/ThermalHydraulics.tex` for a first-pass thermal-hydraulic sizing
-  and Modelica architecture note tied to the current 20 MW annular-core geometry
-- add subpage where for time dependent diffusion with flux visualizations
-  - could also use standard point kinetics but rod insertion reactivity be calculated via diffusion?
-- integrate Modelica FMU for simple systems thermal hydraulics
-- The **prompt generation time** $\Lambda$ could benefite from an adjoint solve i think (or better, an OpenMC calculation so you get: multigroup coefficients, beta_eff and lambda for your 1 or 2 group diffusion simulation model)
+- fix concentricModel.ipynb so we get a fast determinstic solver and get a rod-worth curve
+- perhaps make it work with the P1 approximation
+- one PK model of core is ready, replace backend core with openmc concentric core
+- decide what to do with diffusion solver as 1 energy diffusion is very bad
 
-- FMU build handlded outside of python and frozen (not gitignored)? or handled by a script, like with bun run backend:install?
+- see `theory/ThermalHydraulics.tex` adjust to new core size
+- adjust modelica model
 
-- architecture documentation:
+- FMU build handlded outside of python and frozen (not gitignored)? or handled by a script, like with bun run backend:install? this way simulator can run on macos (if doable)
+
+# architecture documentation:
 
 ###
 for openmc scripts, explaining architecture and functionality of fuel_element.py, involutes.py, ploting.py and reactor_geometry.py. Specially how its object oriented nature and dataclasses interact between each other. But also how they implement what they do (with special emphasis in how the involute plates are generated as polygons from sin,cos curves and transformations). Include also how the frm2_nat.ipynb notebook uses them.
@@ -284,16 +269,3 @@ In thermal_adapter.py:218, _activate_fallback() switches to a simple surrogate t
 In thermal_adapter.py:246, _advance_fallback() advances that surrogate with a first-order temperature response.
 In thermal_adapter.py:382, _unavailable_snapshot() packages an error state for the API.
 
-
-###
--  gave k_eff > 1:
--  plate_count=60, 40
--  plate_thickness_cm=0.5, 0.3
--  coolant_gap_cm=8.0, 4.0
--  inner_radius_cm=100.0, 80.0
--  outer_radius_cm=300.0, 345.0
--  h_active_cm=350.0, 300
-- d2o_tank_radius_cm=862.5, 350.0,
-- h2o_tank_radius_cm=1121.25, 500.0,
-- h_d2o_tank_cm=640.0,720.0,
-- h_h2o_tank_cm=840.0, 1000.0,

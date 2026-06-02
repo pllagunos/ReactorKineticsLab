@@ -1,10 +1,14 @@
-import openmc
-import matplotlib.pyplot as plt
+from __future__ import annotations
+
 import shutil
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
-# how to actually make ploting useful?
+import matplotlib.pyplot as plt
+import numpy as np
+import openmc
+from matplotlib.colors import LogNorm
 
 SERPENT_COLORS = {
     'Light Water': (0, 0, 255),
@@ -66,157 +70,24 @@ def _configured_plot(
     return plot
 
 
-def create_plot(materials: openmc.Materials,id:int) -> openmc.Plot:
-    mat_by_name = {mat.name: mat for mat in materials}
-
-    # Create dictionary material -> color normalized
-    colors = {
-        mat_by_name[name]: rgb
-        for name, rgb in SERPENT_COLORS.items()
-        if name in mat_by_name
-    }
-
-    # Create a basic plot XY
-    plot = openmc.Plot(plot_id=id)
-    plot.color_by = 'material'
-    plot.colors = colors
-
-    plot2 = openmc.Plot(plot_id=id)
-    plot2.color_by = "material"
-    plot2.colors = colors
-    plot2.basis = "xz"
-
-    # Parametri dalla carta MCNP
-    x_low, x_high = -30.0, 5.6
-    y_low, y_high = -5.6, 5.6
-
-    # Calcolo centro e larghezza
-    center_x = 0.5*(x_low + x_high)
-    center_y = 0.5*(y_low + y_high)
-    width_x  = x_high  - x_low
-    width_y  = y_high  - y_low
-
-    # Definizione del plot
-    plot33 = openmc.Plot(plot_id=33)
-    plot33.basis  = 'xy'                           # piano XY
-    plot33.origin = (center_x, center_y, 0.0)      # z=0
-    plot33.width  = (width_x, width_y)             # larghezza in X e Y
-    plot33.pixels = (4000, 4000)  
-    plot33.color_by = "material"
-    plot33.colors = colors               
-
-    #return openmc.Plots([plot,plot2])
-    return plot33
-
-
-
-
-def get_material_colors(model):
-    """
-    Ritorna un dict {Material: (r,g,b)} pronto per Plot.colors,
-    usando direttamente valori 0–255 senza normalizzazione.
-    
-    model può essere un openmc.Universe o un openmc.Geometry.
-    """
-    # Estrae tutti i materiali dal modello
+def get_material_colors(
+    model: openmc.Universe | openmc.Geometry | openmc.Materials,
+) -> dict[openmc.Material, tuple[int, int, int]]:
     if isinstance(model, openmc.Universe):
-        mats = model.get_all_materials().values()
+        materials = model.get_all_materials().values()
     elif isinstance(model, openmc.Geometry):
-        mats = model.get_all_materials().values()
+        materials = model.get_all_materials().values()
     elif isinstance(model, openmc.Materials):
-        mats = model
+        materials = model
     else:
-        raise TypeError("model deve essere Universe, Geometry o Materials")
-    
-    # Costruisce il mapping solo per i materiali presenti in serpent_colors
-    colors = {}
-    for m in mats:
-        rgb = SERPENT_COLORS.get(m.name)#type:ignore
+        raise TypeError("model must be Universe, Geometry, or Materials")
+
+    colors: dict[openmc.Material, tuple[int, int, int]] = {}
+    for material in materials:
+        rgb = SERPENT_COLORS.get(material.name)
         if rgb is not None:
-            colors[m] = rgb  # valori 0–255, openmc li accetta direttamente
-    
+            colors[material] = rgb
     return colors
-
-def region_of(univ):
-    """Returns the union of the regions of all cells in a Universe."""
-    cells = univ.cells.values()
-    # Costruisco l'unione delle loro regioni
-    regs = [c.region for c in cells]
-    if not regs:
-        raise ValueError(f"Il universe {univ.name} non contiene celle!")
-    
-    reg_union = regs[0]
-    for r in regs[1:]:
-        reg_union &= r
-    return reg_union
-
-def verify_material_colors(materials):
-    """
-    Genera un grafico orizzontale per verificare i colori
-    associati a ciascun materiale usando create_plot.
-    """
-    # Crea il plot temporaneo
-    plot = create_plot(materials, id=1)
-    mapping = plot.colors
-
-    # Prepara nomi e colori normalizzati [0–1]
-    names  = [mat.name for mat in mapping]
-    rgbs   = [rgb for rgb in mapping.values()]
-    colors = [(r/255, g/255, b/255) for r, g, b in rgbs]
-
-    # Disegna barre orizzontali
-    fig, ax = plt.subplots(figsize=(6, len(names)*0.5))
-    ax.barh(range(len(names)), [1]*len(names), color=colors)
-    ax.set_yticks(range(len(names)))
-    ax.set_yticklabels(names, fontsize=10)
-    ax.set_xticks([])
-    ax.set_title("Verifica colori materiali", fontsize=12)
-    plt.tight_layout()
-    plt.show()
-
-def basic_4_plots(Root:openmc.Universe)->tuple[openmc.Plot,openmc.Plot,openmc.Plot,openmc.Plot]:
-    # Create the four basic plot used for the plot of each component
-    # use this to have the basic option already set, and then adjust the origin and width to each component
-
-    colors=get_material_colors(Root)
-
-    first_plot = openmc.Plot(name="XY overview")
-    first_plot.basis = 'xy'
-    first_plot.pixels = (4000, 4000)
-    first_plot.color_by = 'material'
-    first_plot.colors = colors
-    first_plot.background= (0,0,0)
-    first_plot.show_overlaps = True
-    first_plot.overlap_color = 'red'
-
-    second_plot = openmc.Plot(name="XY detail")
-    second_plot.basis = 'xy'
-    second_plot.pixels = (4000, 4000)
-    second_plot.color_by = 'material'
-    second_plot.colors = colors
-    second_plot.background= (0,0,0)
-    second_plot.show_overlaps = True
-    second_plot.overlap_color = 'red'
-
-    third_plot = openmc.Plot(name="YZ overview")
-    third_plot.basis = 'yz'
-    third_plot.pixels = (4000, 4000)
-    third_plot.color_by = 'material'
-    third_plot.colors = colors
-    third_plot.background= (0,0,0)
-    third_plot.show_overlaps = True
-    third_plot.overlap_color = 'red'
-
-    fourth_plot = openmc.Plot(name="YZ detail")
-    fourth_plot.basis = 'yz'
-    fourth_plot.pixels = (4000, 4000)
-    fourth_plot.color_by = 'material'
-    fourth_plot.colors = colors
-    fourth_plot.background= (0,0,0)
-    fourth_plot.show_overlaps = True
-    fourth_plot.overlap_color = 'red'
-
-    return first_plot,second_plot,third_plot,fourth_plot
 
 
 def fuel_element_plots(
@@ -334,6 +205,286 @@ def export_and_render_plots(
         openmc_exec=resolve_openmc_exec(openmc_exec),
         export_model_xml=True,
     )
+
+
+def plot_reactor_preview(
+    model: openmc.Model,
+    preview_metadata: dict,
+    fuel_parameters,
+    reactor_tank_parameters,
+    *,
+    quick_layout_plot: Callable[..., None],
+    layout_title: str,
+) -> tuple[plt.Figure, np.ndarray]:
+    fig, axes = plt.subplots(2, 2, figsize=(14, 12), constrained_layout=True)
+
+    model.geometry.root_universe.plot(
+        origin=(0.0, 0.0, 0.0),
+        width=(
+            2.0 * reactor_tank_parameters.h2o_tank_radius_cm,
+            2.0 * reactor_tank_parameters.h2o_tank_radius_cm,
+        ),
+        basis="xy",
+        color_by="material",
+        pixels=(1200, 1200),
+        axes=axes[0, 0],
+    )
+    axes[0, 0].set_title("Full reactor midplane XY slice")
+
+    model.geometry.root_universe.plot(
+        origin=(0.0, 0.0, 0.0),
+        width=(
+            2.2 * fuel_parameters.outer_radius_cm,
+            2.2 * fuel_parameters.outer_radius_cm,
+        ),
+        basis="xy",
+        color_by="material",
+        pixels=(2200, 2200),
+        axes=axes[0, 1],
+    )
+    axes[0, 1].set_title("Fuel-element XY zoom")
+
+    quick_layout_plot(fuel_parameters, ax=axes[1, 0])
+    axes[1, 0].set_title(layout_title)
+
+    model.geometry.root_universe.plot(
+        origin=(0.0, 0.0, 0.0),
+        width=(
+            2.0 * reactor_tank_parameters.d2o_tank_radius_cm,
+            reactor_tank_parameters.h_d2o_tank_cm,
+        ),
+        basis="xz",
+        color_by="material",
+        pixels=(1800, 1600),
+        axes=axes[1, 1],
+    )
+    axes[1, 1].set_title(
+        f"D2O tank XZ slice, rod tip z = {preview_metadata['fuel_element']['rod_tip_z_cm']:.1f} cm"
+    )
+    return fig, axes
+
+
+def _plot_entropy_history(entropy: np.ndarray, inactive_batches: int) -> None:
+    entropy_batches = np.arange(1, entropy.size + 1)
+
+    fig, ax = plt.subplots(figsize=(10, 4), constrained_layout=True)
+    ax.plot(entropy_batches, entropy, color="tab:blue", linewidth=1.2, alpha=0.7, label="entropy")
+
+    if entropy.size >= 10:
+        kernel = np.ones(10, dtype=float) / 10.0
+        smoothed = np.convolve(entropy, kernel, mode="valid")
+        smoothed_batches = np.arange(10, entropy.size + 1)
+        ax.plot(
+            smoothed_batches,
+            smoothed,
+            color="tab:orange",
+            linewidth=2.0,
+            label="10-batch rolling mean",
+        )
+
+    ax.axvline(
+        inactive_batches,
+        color="tab:red",
+        linestyle="--",
+        linewidth=1.2,
+        label=f"inactive cutoff ({inactive_batches})",
+    )
+    ax.set_xlabel("batch")
+    ax.set_ylabel("Shannon entropy")
+    ax.set_title("Fission source convergence")
+    ax.legend()
+    plt.show()
+
+
+def _plot_mesh_tallies(
+    statepoint: openmc.StatePoint,
+    reference_metadata: dict,
+    fuel_parameters,
+    reactor_tank_parameters,
+) -> None:
+    tally_names = reference_metadata.get("tally_names", [])
+    if not tally_names:
+        print(
+            "This run was executed without mesh tallies for speed. Rebuild with global_mesh_shape or fuel_mesh_shape to plot maps."
+        )
+        return
+
+    tally_name = "global-mesh" if "global-mesh" in tally_names else tally_names[0]
+    mesh_tally = statepoint.get_tally(name=tally_name)
+    flux_tally = mesh_tally.get_slice(scores=["flux"])
+    fission_tally = mesh_tally.get_slice(scores=["fission"])
+
+    mesh_dimension = tuple(mesh_tally.filters[0].mesh.dimension)
+    flux = flux_tally.get_reshaped_data(value="mean").reshape(mesh_dimension).squeeze()
+    fission = fission_tally.get_reshaped_data(value="mean").reshape(mesh_dimension).squeeze()
+    flux_std = flux_tally.get_reshaped_data(value="std_dev").reshape(mesh_dimension).squeeze()
+    fission_std = fission_tally.get_reshaped_data(value="std_dev").reshape(mesh_dimension).squeeze()
+
+    flux_masked = np.ma.masked_less_equal(flux, 0.0)
+    fission_masked = np.ma.masked_less_equal(fission, 0.0)
+    flux_rel_err = np.ma.masked_where((flux <= 0.0) | ~np.isfinite(flux_std), flux_std / flux)
+    fission_rel_err = np.ma.masked_where((fission <= 0.0) | ~np.isfinite(fission_std), fission_std / fission)
+
+    positive_flux = np.asarray(flux[flux > 0.0])
+    positive_fission = np.asarray(fission[fission > 0.0])
+    if positive_flux.size == 0 or positive_fission.size == 0:
+        print(f"{tally_name} contains no positive flux or fission scores to plot.")
+        return
+
+    if tally_name == "fuel-mesh":
+        extent = [
+            -fuel_parameters.outer_radius_cm,
+            fuel_parameters.outer_radius_cm,
+            -0.5 * fuel_parameters.h_active_cm,
+            0.5 * fuel_parameters.h_active_cm,
+        ]
+        histories_per_bin = reference_metadata.get("fuel_mesh_histories_per_bin")
+    else:
+        extent = [
+            -reactor_tank_parameters.h2o_tank_radius_cm,
+            reactor_tank_parameters.h2o_tank_radius_cm,
+            -0.5 * reactor_tank_parameters.h_h2o_tank_cm,
+            0.5 * reactor_tank_parameters.h_h2o_tank_cm,
+        ]
+        histories_per_bin = reference_metadata.get("global_mesh_histories_per_bin")
+
+    if histories_per_bin is not None:
+        print(f"{tally_name} histories per bin: {histories_per_bin:.3f}")
+    print(f"flux nonzero fraction: {(flux > 0.0).mean():.3f}")
+    print(f"fission nonzero fraction: {(fission > 0.0).mean():.3f}")
+    if histories_per_bin is not None and histories_per_bin < 10.0:
+        print(
+            "This mesh is strongly under-sampled. Increase active batches and particles, or reduce the mesh size for a readable map."
+        )
+
+    fig, axes = plt.subplots(2, 2, figsize=(14, 10), constrained_layout=True)
+
+    flux_norm = LogNorm(
+        vmin=max(np.percentile(positive_flux, 5), positive_flux.min()),
+        vmax=positive_flux.max(),
+    )
+    fission_norm = LogNorm(
+        vmin=max(np.percentile(positive_fission, 5), positive_fission.min()),
+        vmax=positive_fission.max(),
+    )
+
+    flux_image = axes[0, 0].imshow(
+        flux_masked,
+        origin="lower",
+        aspect="auto",
+        extent=extent,
+        norm=flux_norm,
+        cmap="viridis",
+    )
+    axes[0, 0].set_xlabel("x [cm]")
+    axes[0, 0].set_ylabel("z [cm]")
+    axes[0, 0].set_title(f"Flux score ({tally_name}, log scale)")
+    plt.colorbar(flux_image, ax=axes[0, 0], label="flux")
+
+    fission_image = axes[0, 1].imshow(
+        fission_masked,
+        origin="lower",
+        aspect="auto",
+        extent=extent,
+        norm=fission_norm,
+        cmap="magma",
+    )
+    axes[0, 1].set_xlabel("x [cm]")
+    axes[0, 1].set_ylabel("z [cm]")
+    axes[0, 1].set_title(f"Fission score ({tally_name}, log scale)")
+    plt.colorbar(fission_image, ax=axes[0, 1], label="fission")
+
+    flux_rel_err_finite = np.asarray(flux_rel_err.filled(np.nan))
+    flux_rel_err_finite = flux_rel_err_finite[np.isfinite(flux_rel_err_finite)]
+    fission_rel_err_finite = np.asarray(fission_rel_err.filled(np.nan))
+    fission_rel_err_finite = fission_rel_err_finite[np.isfinite(fission_rel_err_finite)]
+
+    if flux_rel_err_finite.size == 0 or fission_rel_err_finite.size == 0:
+        axes[1, 0].axis("off")
+        axes[1, 1].axis("off")
+        axes[1, 0].text(
+            0.5,
+            0.5,
+            "Relative error is unavailable with only one active batch.",
+            ha="center",
+            va="center",
+            wrap=True,
+        )
+        axes[1, 1].text(
+            0.5,
+            0.5,
+            "Run more active batches to estimate tally uncertainty.",
+            ha="center",
+            va="center",
+            wrap=True,
+        )
+    else:
+        flux_err_image = axes[1, 0].imshow(
+            flux_rel_err,
+            origin="lower",
+            aspect="auto",
+            extent=extent,
+            vmin=0.0,
+            vmax=min(2.0, float(np.percentile(flux_rel_err_finite, 95))),
+            cmap="cividis",
+        )
+        axes[1, 0].set_xlabel("x [cm]")
+        axes[1, 0].set_ylabel("z [cm]")
+        axes[1, 0].set_title("Flux relative error")
+        plt.colorbar(flux_err_image, ax=axes[1, 0], label="std. dev. / mean")
+
+        fission_err_image = axes[1, 1].imshow(
+            fission_rel_err,
+            origin="lower",
+            aspect="auto",
+            extent=extent,
+            vmin=0.0,
+            vmax=min(2.0, float(np.percentile(fission_rel_err_finite, 95))),
+            cmap="cividis",
+        )
+        axes[1, 1].set_xlabel("x [cm]")
+        axes[1, 1].set_ylabel("z [cm]")
+        axes[1, 1].set_title("Fission relative error")
+        plt.colorbar(fission_err_image, ax=axes[1, 1], label="std. dev. / mean")
+
+    plt.show()
+
+
+def show_statepoint_diagnostics(
+    statepoint_path: str | Path | None,
+    reference_metadata: dict | None,
+    fuel_parameters,
+    reactor_tank_parameters,
+) -> None:
+    if statepoint_path is None or reference_metadata is None:
+        print("Run the previous cell after configuring OpenMC nuclear data to get k_eff and optional flux or fission maps.")
+        return
+
+    with openmc.StatePoint(statepoint_path) as statepoint:
+        keff = statepoint.keff
+        rho_pcm = (keff.n - 1.0) / keff.n * 1.0e5
+        print(f"k_eff = {keff.n:.6f} +/- {keff.s:.6f}")
+        print(f"reactivity = {rho_pcm:.1f} pcm")
+
+        entropy = np.asarray(getattr(statepoint, "entropy", []), dtype=float)
+        if entropy.size:
+            inactive_batches = reference_metadata["inactive"]
+            entropy_active = entropy[inactive_batches:]
+            print(f"entropy mesh shape = {reference_metadata['entropy_mesh_shape']}")
+            print(f"final Shannon entropy = {entropy[-1]:.6f}")
+            if entropy_active.size >= 10:
+                entropy_recent_spread = float(np.ptp(entropy_active[-10:]))
+                print(f"entropy spread over last 10 active batches = {entropy_recent_spread:.6f}")
+            _plot_entropy_history(entropy, inactive_batches)
+        else:
+            print("This statepoint does not contain Shannon entropy history.")
+
+        _plot_mesh_tallies(
+            statepoint,
+            reference_metadata,
+            fuel_parameters,
+            reactor_tank_parameters,
+        )
 
 if __name__ == "__main__":
     print("Import this module from fuel_element.py or reactor_geometry.py to create OpenMC plot sets.")
