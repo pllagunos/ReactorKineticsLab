@@ -1,0 +1,9 @@
+[1-9]*
+generated/
+polyMesh/
+
+system/controlDict
+system/regionsDict
+system/neutroRegion/
+constant/neutroRegion/
+0/neutroRegion/defaultFlux*
