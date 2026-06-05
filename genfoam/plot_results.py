@@ -71,7 +71,17 @@ def read_scalar_field(field_path: Path) -> np.ndarray:
     return values
 
 
+def require_supported_manifest(manifest: dict[str, Any]) -> None:
+    mesh_kind = manifest["mesh"].get("kind", "legacy-rz-blocks")
+    if mesh_kind not in {"legacy-rz-blocks", "axisymmetric-wedge"}:
+        raise NotImplementedError(
+            "plot_results.py supports the legacy r-z block manifest and the new axisymmetric wedge manifest. "
+            f"Found mesh.kind={mesh_kind!r}; inspect this mesh in ParaView instead."
+        )
+
+
 def build_cell_table(manifest: dict[str, Any]) -> list[dict[str, float | str]]:
+    require_supported_manifest(manifest)
     return list(manifest["mesh"]["blocks"])
 
 
@@ -109,11 +119,11 @@ def volume_weighted_profiles(manifest: dict[str, Any], values: np.ndarray) -> tu
         r_max = float(block["r_max_m"])
         z_min = float(block["z_min_m"])
         z_max = float(block["z_max_m"])
-        area = float(block["area_m2"])
+        cylindrical_weight = 0.5 * (r_max**2 - r_min**2) * (z_max - z_min)
         radial_centers.append(0.5 * (r_min + r_max))
         axial_centers.append(0.5 * (z_min + z_max))
-        radial_weights.append(area)
-        axial_weights.append(area)
+        radial_weights.append(cylindrical_weight)
+        axial_weights.append(cylindrical_weight)
         radial_values.append(float(value))
         axial_values.append(float(value))
 

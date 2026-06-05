@@ -11,6 +11,15 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
+from gmsh_reactor_mesh import (
+    WEDGE_MESH_KIND,
+    default_reactor_geometry,
+    geometry_payload as manual_geometry_payload,
+    mesh_metadata as gmsh_mesh_metadata,
+    mesh_region_mapping,
+    write_mesh_assets,
+)
+
 
 CASE_DIR = Path(__file__).resolve().parent
 PROJECT_DIR = CASE_DIR.parent
@@ -703,17 +712,27 @@ def build_default_flux_field_text(object_name: str) -> str:
         + "dimensions      [ 0 -2 -1 0 0 0 0 ];\n\n"
         + "internalField   uniform 1;\n\n"
         + "boundaryField\n{\n"
-        + "    axis\n    {\n        type            zeroGradient;\n    }\n"
-        + "    walls\n    {\n        type            fixedValue;\n        value           uniform 0;\n    }\n"
-        + "    \"(front|back)\"\n    {\n        type            wedge;\n    }\n"
+        + "    wedge_front\n    {\n        type            wedge;\n    }\n"
+        + "    wedge_back\n    {\n        type            wedge;\n    }\n"
+        + "    axis\n    {\n        type            symmetryPlane;\n    }\n"
+        + "    bottom\n    {\n        type            fixedValue;\n        value           uniform 0;\n    }\n"
+        + "    top\n    {\n        type            fixedValue;\n        value           uniform 0;\n    }\n"
+        + "    outer\n    {\n        type            fixedValue;\n        value           uniform 0;\n    }\n"
         + "}\n\n"
     )
 
 
 def _zone_block_counts(case_spec: dict[str, Any]) -> dict[str, int]:
     counts: dict[str, int] = {}
-    for block in case_spec["mesh"]["blocks"]:
-        region = block["region"]
+    mesh_info = case_spec["mesh"]
+    if "blocks" in mesh_info:
+        for block in mesh_info["blocks"]:
+            region = block["region"]
+            counts[region] = counts.get(region, 0) + 1
+        return counts
+
+    for mapping in mesh_info.get("region_to_cell_zone", []):
+        region = mapping["region"]
         counts[region] = counts.get(region, 0) + 1
     return counts
 
@@ -761,7 +780,7 @@ def build_nuclear_data_text(case_spec: dict[str, Any]) -> str:
         lines.extend([
             f"            {zone_name}",
             "            {",
-            f"                // Populated from {zone_block_count} OpenMC-derived mesh block(s).",
+            f"                // Populated from {zone_block_count} OpenMC-derived 3D cell zone mapping(s).",
             "                fuelFraction    1;",
             f"                sigmaRemoval    nonuniform List<scalar> {group_count} ({_format_scalar_list(removal)});",
             f"                nuSigmaEff      nonuniform List<scalar> {group_count} ({_format_scalar_list(nu_sigma_eff)});",
@@ -791,161 +810,6 @@ def build_nuclear_data_text(case_spec: dict[str, Any]) -> str:
         "",
     ])
     return "\n".join(lines) + "\n"
-
-
-def build_block_mesh_dict_text(case_spec: dict[str, Any], aperture_rad: float = 0.1) -> str:
-    half_aperture = 0.5 * aperture_rad
-    sin_half = math.sin(half_aperture)
-    cos_half = math.cos(half_aperture)
-    positive_radial_edges = [float(edge) for edge in case_spec["mesh"]["radial_edges_m"] if float(edge) > 0.0]
-    axis_radius_m = min(1.0e-3, min(positive_radial_edges) * 0.025) if positive_radial_edges else 1.0e-3
-
-    vertex_indices: dict[tuple[float, float, str], int] = {}
-    vertex_lines: list[str] = []
-    arc_pairs: dict[tuple[int, int], tuple[float, float, float]] = {}
-    block_lines: list[str] = []
-    axis_faces: list[str] = []
-    wall_faces: list[str] = []
-    front_faces: list[str] = []
-    back_faces: list[str] = []
-
-    z_min_global = min(float(edge) for edge in case_spec["mesh"]["axial_edges_m"])
-    z_max_global = max(float(edge) for edge in case_spec["mesh"]["axial_edges_m"])
-    r_max_global = max(float(edge) for edge in case_spec["mesh"]["radial_edges_m"])
-
-    def vertex_key(r_m: float, z_m: float, side: str) -> tuple[float, float, str]:
-        rounded_r = round(r_m, 12)
-        rounded_z = round(z_m, 12)
-        return (rounded_r, rounded_z, side)
-
-    def vertex_index(r_m: float, z_m: float, side: str) -> int:
-        key = vertex_key(r_m, z_m, side)
-        existing = vertex_indices.get(key)
-        if existing is not None:
-            return existing
-        if key[2] == "axis":
-            x_coord = 0.0
-            y_coord = 0.0
-        else:
-            y_sign = -1.0 if side == "neg" else 1.0
-            x_coord = r_m * cos_half
-            y_coord = y_sign * r_m * sin_half
-        index = len(vertex_lines)
-        vertex_indices[key] = index
-        vertex_lines.append(
-            f"    ({_format_number(x_coord)} {_format_number(y_coord)} {_format_number(z_m)})"
-        )
-        return index
-
-    def add_arc(r_m: float, z_m: float) -> None:
-        if round(r_m, 12) == 0.0:
-            return
-        start = vertex_index(r_m, z_m, "neg")
-        end = vertex_index(r_m, z_m, "pos")
-        pair = (min(start, end), max(start, end))
-        arc_pairs[pair] = (r_m, 0.0, z_m)
-
-    for block in case_spec["mesh"]["blocks"]:
-        r_min_m = float(block["r_min_m"])
-        r_max_m = float(block["r_max_m"])
-        z_min_m = float(block["z_min_m"])
-        z_max_m = float(block["z_max_m"])
-        r_inner_m = axis_radius_m if math.isclose(r_min_m, 0.0, rel_tol=0.0, abs_tol=1.0e-12) else r_min_m
-
-        v0 = vertex_index(r_inner_m, z_min_m, "neg")
-        v1 = vertex_index(r_max_m, z_min_m, "neg")
-        v2 = vertex_index(r_max_m, z_min_m, "pos")
-        v3 = vertex_index(r_inner_m, z_min_m, "pos")
-        v4 = vertex_index(r_inner_m, z_max_m, "neg")
-        v5 = vertex_index(r_max_m, z_max_m, "neg")
-        v6 = vertex_index(r_max_m, z_max_m, "pos")
-        v7 = vertex_index(r_inner_m, z_max_m, "pos")
-
-        add_arc(r_inner_m, z_min_m)
-        add_arc(r_max_m, z_min_m)
-        add_arc(r_inner_m, z_max_m)
-        add_arc(r_max_m, z_max_m)
-
-        block_lines.append(
-            f"    hex ({v0} {v1} {v2} {v3} {v4} {v5} {v6} {v7}) {block['region']} (1 1 1) simpleGrading (1 1 1)"
-        )
-
-        if math.isclose(z_min_m, z_min_global, rel_tol=0.0, abs_tol=1.0e-12):
-            wall_faces.append(f"            ({v0} {v3} {v2} {v1})")
-        if math.isclose(z_max_m, z_max_global, rel_tol=0.0, abs_tol=1.0e-12):
-            wall_faces.append(f"            ({v4} {v5} {v6} {v7})")
-        if math.isclose(r_max_m, r_max_global, rel_tol=0.0, abs_tol=1.0e-12):
-            wall_faces.append(f"            ({v1} {v2} {v6} {v5})")
-        if math.isclose(r_min_m, 0.0, rel_tol=0.0, abs_tol=1.0e-12):
-            axis_faces.append(f"            ({v0} {v4} {v7} {v3})")
-
-        front_faces.append(f"            ({v0} {v1} {v5} {v4})")
-        back_faces.append(f"            ({v3} {v2} {v6} {v7})")
-
-    arc_lines = [
-        f"    arc {start} {end} ({_format_number(midpoint[0])} {_format_number(midpoint[1])} {_format_number(midpoint[2])})"
-        for (start, end), midpoint in sorted(arc_pairs.items())
-    ]
-
-    lines = [
-        _dictionary_header("blockMeshDict").rstrip(),
-        f"aperture   {_format_number(aperture_rad)};",
-        "",
-        "vertices",
-        "(",
-        *vertex_lines,
-        ");",
-        "",
-        "blocks",
-        "(",
-        *block_lines,
-        ");",
-        "",
-        "edges",
-        "(",
-        *arc_lines,
-        ");",
-        "",
-        "boundary",
-        "(",
-        "    axis",
-        "    {",
-        "        type patch;",
-        "        faces",
-        "        (",
-        *axis_faces,
-        "        );",
-        "    }",
-        "    walls",
-        "    {",
-        "        type patch;",
-        "        faces",
-        "        (",
-        *wall_faces,
-        "        );",
-        "    }",
-        "    front",
-        "    {",
-        "        type wedge;",
-        "        faces",
-        "        (",
-        *front_faces,
-        "        );",
-        "    }",
-        "    back",
-        "    {",
-        "        type wedge;",
-        "        faces",
-        "        (",
-        *back_faces,
-        "        );",
-        "    }",
-        ");",
-        "",
-    ]
-    return "\n".join(lines) + "\n"
-
-
 def build_allclean_text() -> str:
     return (
         "#!/bin/sh\n"
@@ -956,13 +820,19 @@ def build_allclean_text() -> str:
 
 
 def build_allmesh_text() -> str:
+    mesh_file = Path("constant/generated/concentric_reactor_wedge.msh")
+    mesh_manifest = Path("constant/generated/concentric_reactor_mesh_manifest.json")
     return (
         "#!/bin/sh\n"
         "cd ${0%/*} || exit 1\n\n"
         ". $WM_PROJECT_DIR/bin/tools/RunFunctions\n\n"
-        "rm -rf log.blockMesh log.checkMesh\n"
-        "runApplication blockMesh -case . -region neutroRegion\n"
+        "rm -rf log.gmshGenerate log.gmshToFoam log.configureMesh log.checkMesh log.validateMesh\n"
+        "rm -rf constant/neutroRegion/polyMesh\n"
+        f"runApplication -s log.gmshGenerate conda run -n openmc python gmsh_reactor_mesh.py generate --mesh-kind {WEDGE_MESH_KIND} --mesh-file {mesh_file} --manifest-file {mesh_manifest}\n"
+        f"runApplication -s log.gmshToFoam gmshToFoam -case . -region neutroRegion {mesh_file}\n"
+        f"runApplication -s log.configureMesh conda run -n openmc python gmsh_reactor_mesh.py configure-import --case-dir . --region neutroRegion --manifest-file {mesh_manifest}\n"
         "runApplication checkMesh -case . -region neutroRegion\n"
+        f"runApplication -s log.validateMesh conda run -n openmc python gmsh_reactor_mesh.py validate-import --case-dir . --region neutroRegion --manifest-file {mesh_manifest}\n"
     )
 
 
@@ -981,7 +851,6 @@ def write_openfoam_case(case_spec: dict[str, Any], case_dir: Path) -> dict[str, 
     output_paths = {
         "controlDict": case_dir / "system" / "controlDict",
         "regionsDict": case_dir / "system" / "regionsDict",
-        "blockMeshDict": case_dir / "system" / "neutroRegion" / "blockMeshDict",
         "fvSchemes": case_dir / "system" / "neutroRegion" / "fvSchemes",
         "fvSolution": case_dir / "system" / "neutroRegion" / "fvSolution",
         "neutronicsProperties": case_dir / "constant" / "neutroRegion" / "neutronicsProperties",
@@ -993,7 +862,6 @@ def write_openfoam_case(case_spec: dict[str, Any], case_dir: Path) -> dict[str, 
 
     write_text(output_paths["controlDict"], build_control_dict_text())
     write_text(output_paths["regionsDict"], build_regions_dict_text())
-    write_text(output_paths["blockMeshDict"], build_block_mesh_dict_text(case_spec))
     write_text(output_paths["fvSchemes"], build_fv_schemes_text())
     write_text(output_paths["fvSolution"], build_fv_solution_text())
     write_text(output_paths["neutronicsProperties"], build_neutronics_properties_text())
@@ -1003,6 +871,10 @@ def write_openfoam_case(case_spec: dict[str, Any], case_dir: Path) -> dict[str, 
     write_text(output_paths["Allrun"], build_allrun_text())
     for script_name in ("Allclean", "Allmesh", "Allrun"):
         output_paths[script_name].chmod(0o755)
+
+    legacy_block_mesh = case_dir / "system" / "neutroRegion" / "blockMeshDict"
+    if legacy_block_mesh.exists():
+        legacy_block_mesh.unlink()
 
     uniform_dir = case_dir / "0" / "uniform"
     uniform_dir.mkdir(parents=True, exist_ok=True)
@@ -1033,16 +905,26 @@ def write_openfoam_case(case_spec: dict[str, Any], case_dir: Path) -> dict[str, 
     return output_paths | {"fluxFiles": default_flux_paths}
 
 
-def build_case_spec(mgxs_export_dir: Path) -> dict[str, Any]:
+def build_case_spec(mgxs_export_dir: Path, output_dir: Path) -> dict[str, Any]:
     mgxs_export_dir = require_dir(mgxs_export_dir)
     model_xml_path = require_file(mgxs_export_dir / "reactor_run" / "model.xml")
     mgxs_json_path = require_file(mgxs_export_dir / "outputs" / "mgxs_constants.json")
     export = load_json(mgxs_json_path)
-    geometry = extract_concentric_geometry(model_xml_path)
-    overlay_zones = build_overlay_zones(export, geometry)
-    radial_edges_m, axial_edges_m, mesh_blocks = build_mesh_blocks(geometry, overlay_zones)
+    manual_geometry = default_reactor_geometry()
+    geometry = manual_geometry_payload(manual_geometry)
+    region_mapping = mesh_region_mapping(manual_geometry)
+    mesh_info = gmsh_mesh_metadata(
+        mesh_file=output_dir / "concentric_reactor_wedge.msh",
+        manifest_file=output_dir / "concentric_reactor_mesh_manifest.json",
+        geometry=manual_geometry,
+        mesh_kind=WEDGE_MESH_KIND,
+    )
 
     domain_order = [label for label, _ in export["config"]["domain_definitions"]]
+    configured_regions = {item["region"] for item in region_mapping}
+    missing_regions = [label for label in domain_order if label not in configured_regions]
+    if missing_regions:
+        raise ValueError(f"Manual Gmsh geometry is missing configured regions for: {', '.join(missing_regions)}")
     materials = {
         domain_label: build_material_payload(export, domain_label)
         for domain_label in domain_order
@@ -1062,13 +944,8 @@ def build_case_spec(mgxs_export_dir: Path) -> dict[str, Any]:
             "delayed_groups": export["config"]["delayed_groups"],
         },
         "geometry": geometry,
-        "overlay_zones": [asdict(zone) for zone in overlay_zones],
-        "mesh": {
-            "radial_edges_m": radial_edges_m,
-            "axial_edges_m": axial_edges_m,
-            "block_count": len(mesh_blocks),
-            "blocks": [asdict(block) | {"area_m2": block.area_m2} for block in mesh_blocks],
-        },
+        "mesh_regions": region_mapping,
+        "mesh": mesh_info,
         "materials": materials,
         "openmc_run": export.get("run", {}),
     }
@@ -1078,21 +955,22 @@ def write_case_outputs(case_spec: dict[str, Any], output_dir: Path) -> dict[str,
     output_dir.mkdir(parents=True, exist_ok=True)
     files = {
         "manifest": output_dir / "concentric_case_manifest.json",
-        "blocks_csv": output_dir / "concentric_mesh_blocks.csv",
-        "zones_csv": output_dir / "concentric_overlay_zones.csv",
+        "mesh_manifest": output_dir / "concentric_reactor_mesh_manifest.json",
+        "mesh_file": output_dir / "concentric_reactor_wedge.msh",
+        "zones_csv": output_dir / "concentric_mesh_regions.csv",
         "materials": output_dir / "concentric_materials.json",
     }
+    write_mesh_assets(
+        mesh_file=files["mesh_file"],
+        manifest_file=files["mesh_manifest"],
+        mesh_kind=WEDGE_MESH_KIND,
+    )
     write_json(files["manifest"], case_spec)
     write_json(files["materials"], {"materials": case_spec["materials"], "config": case_spec["config"]})
     write_csv(
-        files["blocks_csv"],
-        rows=case_spec["mesh"]["blocks"],
-        fieldnames=["block_id", "region", "r_min_m", "r_max_m", "z_min_m", "z_max_m", "area_m2"],
-    )
-    write_csv(
         files["zones_csv"],
-        rows=case_spec["overlay_zones"],
-        fieldnames=["label", "region", "r_min_m", "r_max_m", "z_min_m", "z_max_m"],
+        rows=case_spec["mesh_regions"],
+        fieldnames=["region", "cell_zone"],
     )
     return files
 
@@ -1118,7 +996,7 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    case_spec = build_case_spec(args.mgxs_export_dir)
+    case_spec = build_case_spec(args.mgxs_export_dir, args.output_dir)
     files = write_case_outputs(case_spec, args.output_dir)
     openfoam_files = write_openfoam_case(case_spec, CASE_DIR)
 
@@ -1133,8 +1011,7 @@ def main() -> None:
         json.dumps(
             {
                 "group_count": case_spec["config"]["group_count"],
-                "overlay_zone_count": len(case_spec["overlay_zones"]),
-                "mesh_block_count": case_spec["mesh"]["block_count"],
+                "mesh_region_count": len(case_spec["mesh_regions"]),
                 "output_files": {name: str(path) for name, path in files.items()},
                 "openfoam_case_files": rendered_openfoam_files,
             },

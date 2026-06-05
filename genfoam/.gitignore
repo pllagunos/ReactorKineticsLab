@@ -7,3 +7,6 @@ system/regionsDict
 system/neutroRegion/
 constant/neutroRegion/
 0/neutroRegion/defaultFlux*
+
+*.foam
+*log.*

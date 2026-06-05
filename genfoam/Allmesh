@@ -3,6 +3,10 @@ cd ${0%/*} || exit 1
 
 . $WM_PROJECT_DIR/bin/tools/RunFunctions
 
-rm -rf log.blockMesh log.checkMesh
-runApplication blockMesh -case . -region neutroRegion
+rm -rf log.gmshGenerate log.gmshToFoam log.configureMesh log.checkMesh log.validateMesh
+rm -rf constant/neutroRegion/polyMesh
+runApplication -s log.gmshGenerate conda run -n openmc python gmsh_reactor_mesh.py generate --mesh-kind axisymmetric-wedge --mesh-file constant/generated/concentric_reactor_wedge.msh --manifest-file constant/generated/concentric_reactor_mesh_manifest.json
+runApplication -s log.gmshToFoam gmshToFoam -case . -region neutroRegion constant/generated/concentric_reactor_wedge.msh
+runApplication -s log.configureMesh conda run -n openmc python gmsh_reactor_mesh.py configure-import --case-dir . --region neutroRegion --manifest-file constant/generated/concentric_reactor_mesh_manifest.json
 runApplication checkMesh -case . -region neutroRegion
+runApplication -s log.validateMesh conda run -n openmc python gmsh_reactor_mesh.py validate-import --case-dir . --region neutroRegion --manifest-file constant/generated/concentric_reactor_mesh_manifest.json
