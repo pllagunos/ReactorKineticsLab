@@ -191,8 +191,32 @@ Only commit when:
 
 If you do commit:
 - stage intentionally
-- write a concise, informative message
+- inspect `git diff --staged` and `git status --short` before writing the message
+- match the repository's recent commit style when it is coherent; otherwise use the format below
+- write the subject in imperative mood and make it specific to the behavioral change
+- explain why the change exists, not just which files moved
+- avoid vague subjects like `update`, `fix stuff`, `changes`, `misc`, `wip`, or file-name-only summaries
+- prefer one logical change per commit; if the staged diff mixes unrelated work, stop and fix staging before committing
 - report the branch and rollback option in `final`
+
+Commit message format:
+
+`<area>: <specific imperative summary>`
+
+Optional body:
+- one short line on the user-visible or system-level effect
+- one short line on why this approach was chosen when that is not obvious
+
+Good examples:
+- `genfoam: preserve concentric case material ordering`
+- `openmc: export scatter data in GenFoam group layout`
+- `frontend: prevent stale reactor state from overwriting edits`
+
+Bad examples:
+- `update genfoam`
+- `fix README`
+- `changes`
+- `wip`
 
 ## Evidence Standard
 
