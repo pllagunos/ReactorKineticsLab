@@ -14,12 +14,9 @@ The current implementation uses the structure of the GeN-Foam `2D_externalSource
 - uses a manual geometry source derived from the OpenMC reference model dimensions and region names
 - uses the Gmsh Python API to build an axisymmetric wedge mesh as the active neutronics mesh
 - represents the centerline as a very small inner cylindrical symmetry patch to avoid collapsed-axis import defects in `gmshToFoam`
-- loads the exported MGXS constants from `openmc/build/concentric/mgxs_export`
-- converts geometry from cm to m and MGXS data to SI-style units
-- collapses higher-order scattering exports to the zeroth Legendre moment for diffusion use
-- sanitizes inactive-group diffusion coefficients
-- sanitizes zero-removal and zero-inverse-velocity groups that break the GeN-Foam solve
-- assigns valid precursor decay constants in non-fuel zones so diagonal precursor solves remain well-posed
+- uses `openmcToFoam` / `MultiGroupXS` as the neutronics cross-section source of truth
+- adapts the `openmcToFoam` outputs into the current GeN-Foam `states(reference { zones (...) })` format
+- preserves only the local sanitization still needed for inactive-group diffusion, zero-removal, and non-finite field cleanup
 - writes the corresponding GeN-Foam case files for the imported wedge mesh
 
 `openmc/build/concentric/reactor_run/model.xml` is still required as a reference artifact in the upstream export, but the current `genfoam` workflow does not parse it automatically.
@@ -38,7 +35,11 @@ Optional arguments:
 ```bash
 python genfoam/prepare_concentric_case.py \
   --mgxs-export-dir openmc/build/concentric/mgxs_export \
-  --output-dir genfoam/constant/generated
+  --output-dir genfoam/constant/generated \
+  --openmc-to-foam-tool-root /path/to/openmcToFoam \
+  --openmc-particles 2000 \
+  --openmc-batches 12 \
+  --openmc-inactive 4
 ```
 
 ## Generated Files
@@ -48,8 +49,11 @@ The script writes the following metadata files under `genfoam/constant/generated
 - `concentric_case_manifest.json` — combined source, geometry, mesh, and material payload
 - `concentric_reactor_wedge.msh` — axisymmetric Gmsh wedge mesh for the concentric reactor
 - `concentric_reactor_mesh_manifest.json` — expected physical groups, zone names, geometry, and mesh sizing used for the Gmsh mesh
-- `concentric_mesh_regions.csv` — canonical region-to-cellZone mapping shared by the mesh and MGXS-derived nuclear data
+- `concentric_mesh_regions.csv` — canonical region-to-cellZone mapping shared by the mesh and `openmcToFoam`-derived nuclear data
 - `concentric_materials.json` — per-domain multigroup constants and delayed-neutron data in converted units
+- `openmc_to_foam_xs/summary.json` — source-run metadata and artifact paths for the active `openmcToFoam` XS workflow
+- `openmc_to_foam_xs/nuclearData.openmcToFoam` — raw legacy `openmcToFoam` output retained for inspection
+- `openmc_to_foam_xs/nuclearData.genfoam` — adapted GeN-Foam `states/reference` nuclear data generated from the `openmcToFoam` source
 
 It also writes the active GeN-Foam case files in place:
 
@@ -118,21 +122,23 @@ Current `checkMesh` status for the imported wedge mesh:
 - wedge patches are rewritten to OpenFOAM `wedge` patch types after `gmshToFoam`
 - the centerline patch is rewritten to `symmetryPlane`
 
-## openmcToFoam Reference Path
+## openmcToFoam XS Path
 
-`openmcToFoam` is integrated as a separate comparison workflow, not as the default nuclear-data path. It reruns OpenMC with the `openmcToFoam` tally set, writes a reference `nuclearData` file, and compares the resulting zone vectors against the local hand-written generator:
+`openmcToFoam` is now the default cross-section source. The local Python code is only an adapter and sanitization layer for current GeN-Foam input compatibility.
+
+The helper below reruns the same `openmcToFoam` source path and compares the raw `MultiGroupXS` outputs against the sanitized adapter outputs:
 
 ```bash
 conda run -n openmc python genfoam/openmc_to_foam_reference.py
 ```
 
-The helper now expects `MultiGroupXS` to be importable in the active Python environment. If it is not installed into that environment, pass `--tool-root /path/to/openmcToFoam` or set `OPENMCTOFOAM_ROOT`.
+If `MultiGroupXS` is not importable in the active Python environment, pass `--tool-root /path/to/openmcToFoam` or set `OPENMCTOFOAM_ROOT`.
 
 Outputs are written under `genfoam/constant/generated/openmc_to_foam_reference/`.
 
 ## Next Steps
 - Compare wedge `k_eff` and flux smoothness against the experimental full-3D path.
-- Review the `openmcToFoam` comparison report and decide whether to cut over the default `nuclearData` generator.
+- Tighten the remaining adapter sanitization only where the raw `openmcToFoam` output still produces non-finite or solver-breaking values.
 - Make the generator target a selected group sweep so you can switch between 2, 8, 16, 25, and 40-group cases without editing files by hand.
 
 ## Visualization with ParaView

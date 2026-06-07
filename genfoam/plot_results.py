@@ -1,12 +1,10 @@
 from __future__ import annotations
 
 import argparse
-import math
+import json
 import re
 from pathlib import Path
 from typing import Any
-
-import json
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -71,29 +69,29 @@ def read_scalar_field(field_path: Path) -> np.ndarray:
     return values
 
 
-def require_supported_manifest(manifest: dict[str, Any]) -> None:
-    mesh_kind = manifest["mesh"].get("kind", "legacy-rz-blocks")
-    if mesh_kind not in {"legacy-rz-blocks", "axisymmetric-wedge"}:
+def structured_mesh(manifest: dict[str, Any]) -> dict[str, Any]:
+    mesh = manifest["mesh"]
+    mesh_kind = mesh.get("kind")
+    if mesh_kind not in {"axisymmetric-wedge", "full-3d-experimental"}:
         raise NotImplementedError(
-            "plot_results.py supports the legacy r-z block manifest and the new axisymmetric wedge manifest. "
-            f"Found mesh.kind={mesh_kind!r}; inspect this mesh in ParaView instead."
+            "plot_results.py expects a structured Gmsh mesh manifest from the current genfoam workflow. "
+            f"Found mesh.kind={mesh_kind!r}."
         )
-
-
-def build_cell_table(manifest: dict[str, Any]) -> list[dict[str, float | str]]:
-    require_supported_manifest(manifest)
-    return list(manifest["mesh"]["blocks"])
+    if "blocks" not in mesh or "radial_edges_m" not in mesh or "axial_edges_m" not in mesh:
+        raise ValueError("Structured Gmsh mesh metadata is missing blocks or grid edges")
+    return mesh
 
 
 def build_grid(manifest: dict[str, Any], values: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    blocks = build_cell_table(manifest)
+    mesh = structured_mesh(manifest)
+    blocks = mesh["blocks"]
     if values.size != len(blocks):
         raise ValueError(
             f"Field value count {values.size} does not match manifest block count {len(blocks)}"
         )
 
-    radial_edges = np.asarray(manifest["mesh"]["radial_edges_m"], dtype=float)
-    axial_edges = np.asarray(manifest["mesh"]["axial_edges_m"], dtype=float)
+    radial_edges = np.asarray(mesh["radial_edges_m"], dtype=float)
+    axial_edges = np.asarray(mesh["axial_edges_m"], dtype=float)
     grid = np.full((axial_edges.size - 1, radial_edges.size - 1), np.nan, dtype=float)
 
     radial_lookup = {round(float(edge), 12): index for index, edge in enumerate(radial_edges)}
@@ -106,7 +104,7 @@ def build_grid(manifest: dict[str, Any], values: np.ndarray) -> tuple[np.ndarray
 
 
 def volume_weighted_profiles(manifest: dict[str, Any], values: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    blocks = build_cell_table(manifest)
+    blocks = structured_mesh(manifest)["blocks"]
     radial_centers: list[float] = []
     axial_centers: list[float] = []
     radial_weights: list[float] = []

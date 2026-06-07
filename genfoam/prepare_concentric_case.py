@@ -5,9 +5,6 @@ import csv
 import json
 import math
 import shutil
-import re
-import xml.etree.ElementTree as ET
-from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
@@ -19,40 +16,17 @@ from gmsh_reactor_mesh import (
     mesh_region_mapping,
     write_mesh_assets,
 )
+from openmc_to_genfoam_xs import (
+    DEFAULT_OUTPUT_SUBDIR as DEFAULT_OPENMCTOFOAM_OUTPUT_SUBDIR,
+    build_nuclear_data_text_from_openmc_to_foam,
+    generate_openmc_to_foam_xs,
+)
 
 
 CASE_DIR = Path(__file__).resolve().parent
 PROJECT_DIR = CASE_DIR.parent
 DEFAULT_MGXS_EXPORT_DIR = PROJECT_DIR / "openmc" / "build" / "concentric" / "mgxs_export"
 DEFAULT_OUTPUT_DIR = CASE_DIR / "constant" / "generated"
-_FUEL_RING_LABEL_PATTERN = re.compile(r"^core_fuel_ring_(\d+)$")
-
-
-@dataclass(frozen=True)
-class OverlayZone:
-    label: str
-    region: str
-    r_min_m: float
-    r_max_m: float
-    z_min_m: float
-    z_max_m: float
-
-    def contains(self, r_m: float, z_m: float) -> bool:
-        return self.r_min_m <= r_m < self.r_max_m and self.z_min_m <= z_m < self.z_max_m
-
-
-@dataclass(frozen=True)
-class MeshBlock:
-    block_id: str
-    region: str
-    r_min_m: float
-    r_max_m: float
-    z_min_m: float
-    z_max_m: float
-
-    @property
-    def area_m2(self) -> float:
-        return (self.r_max_m - self.r_min_m) * (self.z_max_m - self.z_min_m)
 
 
 def require_dir(path: Path) -> Path:
@@ -70,115 +44,6 @@ def require_file(path: Path) -> Path:
 def load_json(path: Path) -> dict[str, Any]:
     with path.open("r", encoding="utf-8") as handle:
         return json.load(handle)
-
-
-def parse_surface_value(surface: ET.Element) -> float:
-    coeffs = [float(token) for token in surface.attrib["coeffs"].split()]
-    surface_type = surface.attrib["type"]
-    if surface_type == "z-cylinder":
-        return coeffs[-1]
-    if surface_type == "z-plane":
-        return coeffs[0]
-    raise ValueError(f"Unsupported surface type in model.xml: {surface_type}")
-
-
-def extract_cell_bounds(root: ET.Element, cell_name: str) -> dict[str, float | list[float]]:
-    cell = root.find(f".//cell[@name='{cell_name}']")
-    if cell is None:
-        raise ValueError(f"Could not find cell named {cell_name!r} in model.xml")
-
-    surface_map = {surface.attrib["id"]: surface for surface in root.findall(".//surface")}
-    surface_ids = {token.lstrip("-") for token in re.findall(r"-?\d+", cell.attrib["region"])}
-    surfaces = [surface_map[surface_id] for surface_id in surface_ids]
-
-    cylinder_radii = sorted(
-        parse_surface_value(surface)
-        for surface in surfaces
-        if surface.attrib["type"] == "z-cylinder"
-    )
-    z_planes = sorted(
-        parse_surface_value(surface)
-        for surface in surfaces
-        if surface.attrib["type"] == "z-plane"
-    )
-    if not z_planes:
-        raise ValueError(f"Cell {cell_name!r} is missing axial surfaces")
-
-    return {
-        "radii_cm": cylinder_radii,
-        "r_min_cm": cylinder_radii[0] if len(cylinder_radii) > 1 else 0.0,
-        "r_max_cm": cylinder_radii[-1] if cylinder_radii else 0.0,
-        "z_min_cm": z_planes[0],
-        "z_max_cm": z_planes[-1],
-        "height_cm": z_planes[-1] - z_planes[0],
-    }
-
-
-def _cm_to_m(value_cm: float) -> float:
-    return float(value_cm) * 1.0e-2
-
-
-def extract_concentric_geometry(model_xml_path: Path) -> dict[str, Any]:
-    root = ET.parse(model_xml_path).getroot()
-    fuel_element = extract_cell_bounds(root, "fuel_element")
-    moderator = extract_cell_bounds(root, "d2o_tank")
-    reflector = extract_cell_bounds(root, "h2o_tank")
-    control_rod = extract_cell_bounds(root, "control_rod")
-
-    geometry: dict[str, Any] = {
-        "fuel_element_radius_m": _cm_to_m(float(fuel_element["r_max_cm"])),
-        "fuel_element_height_m": _cm_to_m(float(fuel_element["height_cm"])),
-        "moderator_radius_m": _cm_to_m(float(moderator["r_max_cm"])),
-        "moderator_height_m": _cm_to_m(float(moderator["height_cm"])),
-        "reflector_radius_m": _cm_to_m(float(reflector["r_max_cm"])),
-        "reflector_height_m": _cm_to_m(float(reflector["height_cm"])),
-        "outer_height_m": _cm_to_m(float(max(moderator["height_cm"], reflector["height_cm"]))),
-        "rod_radius_m": _cm_to_m(float(control_rod["r_max_cm"])),
-        "parked_rod_z_min_m": _cm_to_m(float(control_rod["z_min_cm"])),
-        "parked_rod_z_max_m": _cm_to_m(float(control_rod["z_max_cm"])),
-    }
-
-    fuel_ring_names = sorted(
-        (
-            cell.attrib["name"]
-            for cell in root.findall(".//cell")
-            if "name" in cell.attrib and re.match(r"^fuel_ring_\d+$", cell.attrib["name"])
-        ),
-        key=lambda name: int(name.rsplit("_", 1)[-1]),
-    )
-    if fuel_ring_names:
-        fuel_rings = [extract_cell_bounds(root, name) for name in fuel_ring_names]
-        central_channel = extract_cell_bounds(root, "central_moderator_channel")
-        geometry["core_radius_m"] = _cm_to_m(float(fuel_element["r_max_cm"]))
-        geometry["core_height_m"] = _cm_to_m(float(fuel_rings[0]["height_cm"]))
-        geometry["central_channel_radius_m"] = _cm_to_m(float(central_channel["r_max_cm"]))
-        geometry["fuel_rings"] = [
-            {
-                "cell_name": name,
-                "r_min_m": _cm_to_m(float(bounds["r_min_cm"])),
-                "r_max_m": _cm_to_m(float(bounds["r_max_cm"])),
-                "z_min_m": _cm_to_m(float(bounds["z_min_cm"])),
-                "z_max_m": _cm_to_m(float(bounds["z_max_cm"])),
-            }
-            for name, bounds in zip(fuel_ring_names, fuel_rings, strict=True)
-        ]
-    else:
-        geometry["core_radius_m"] = _cm_to_m(float(fuel_element["r_max_cm"]))
-        geometry["core_height_m"] = _cm_to_m(float(fuel_element["height_cm"]))
-        geometry["central_channel_radius_m"] = _cm_to_m(float(control_rod["r_max_cm"]))
-        geometry["fuel_rings"] = []
-
-    return geometry
-
-
-def sorted_resolved_fuel_ring_labels(export: dict[str, Any]) -> list[str]:
-    labels: list[tuple[int, str]] = []
-    for label in export["domains"]:
-        match = _FUEL_RING_LABEL_PATTERN.match(label)
-        if match is None:
-            continue
-        labels.append((int(match.group(1)), label))
-    return [label for _, label in sorted(labels)]
 
 
 def _collapse_legendre_moment(values: Any) -> Any:
@@ -354,137 +219,6 @@ def build_material_payload(export: dict[str, Any], domain_label: str) -> dict[st
     }
 
 
-def build_overlay_zones(export: dict[str, Any], geometry: dict[str, Any]) -> list[OverlayZone]:
-    fuel_ring_labels = sorted_resolved_fuel_ring_labels(export)
-    if not fuel_ring_labels:
-        return [
-            OverlayZone(
-                label="core",
-                region="core",
-                r_min_m=0.0,
-                r_max_m=float(geometry["core_radius_m"]),
-                z_min_m=-0.5 * float(geometry["core_height_m"]),
-                z_max_m=0.5 * float(geometry["core_height_m"]),
-            ),
-            OverlayZone(
-                label="moderator",
-                region="moderator",
-                r_min_m=0.0,
-                r_max_m=float(geometry["moderator_radius_m"]),
-                z_min_m=-0.5 * float(geometry["moderator_height_m"]),
-                z_max_m=0.5 * float(geometry["moderator_height_m"]),
-            ),
-        ]
-
-    core_height_m = float(geometry["core_height_m"])
-    fuel_element_height_m = float(geometry["fuel_element_height_m"])
-    moderator_height_m = float(geometry["moderator_height_m"])
-    moderator_radius_m = float(geometry["moderator_radius_m"])
-    core_radius_m = float(geometry["core_radius_m"])
-    central_radius_m = float(geometry["central_channel_radius_m"])
-
-    zones = [
-        OverlayZone(
-            label="moderator",
-            region="moderator",
-            r_min_m=0.0,
-            r_max_m=moderator_radius_m,
-            z_min_m=-0.5 * moderator_height_m,
-            z_max_m=0.5 * moderator_height_m,
-        ),
-        OverlayZone(
-            label="core_heavy_water_coolant_and_moderator",
-            region="core_heavy_water_coolant_and_moderator",
-            r_min_m=0.0,
-            r_max_m=core_radius_m,
-            z_min_m=-0.5 * fuel_element_height_m,
-            z_max_m=0.5 * fuel_element_height_m,
-        ),
-        OverlayZone(
-            label="core_central_moderator_channel",
-            region="core_central_moderator_channel",
-            r_min_m=0.0,
-            r_max_m=central_radius_m,
-            z_min_m=-0.5 * fuel_element_height_m,
-            z_max_m=0.5 * core_height_m,
-        ),
-    ]
-
-    ring_geometry_by_label = {
-        f"core_{entry['cell_name']}": entry
-        for entry in geometry["fuel_rings"]
-    }
-    for label in fuel_ring_labels:
-        bounds = ring_geometry_by_label[label]
-        zones.append(
-            OverlayZone(
-                label=label,
-                region=label,
-                r_min_m=float(bounds["r_min_m"]),
-                r_max_m=float(bounds["r_max_m"]),
-                z_min_m=float(bounds["z_min_m"]),
-                z_max_m=float(bounds["z_max_m"]),
-            )
-        )
-
-    if "core_control_rod" in export["domains"]:
-        zones.append(
-            OverlayZone(
-                label="core_control_rod",
-                region="core_control_rod",
-                r_min_m=0.0,
-                r_max_m=float(geometry["rod_radius_m"]),
-                z_min_m=float(geometry["parked_rod_z_min_m"]),
-                z_max_m=float(geometry["parked_rod_z_max_m"]),
-            )
-        )
-
-    return zones
-
-
-def _unique_sorted(values: list[float], digits: int = 10) -> list[float]:
-    deduplicated = sorted({round(value, digits) for value in values})
-    return [float(value) for value in deduplicated]
-
-
-def build_mesh_blocks(geometry: dict[str, Any], overlay_zones: list[OverlayZone]) -> tuple[list[float], list[float], list[MeshBlock]]:
-    reflector_radius_m = float(geometry["reflector_radius_m"])
-    reflector_height_m = float(geometry["reflector_height_m"])
-    radial_edges = [0.0, reflector_radius_m]
-    axial_edges = [-0.5 * reflector_height_m, 0.5 * reflector_height_m]
-    for zone in overlay_zones:
-        radial_edges.extend([zone.r_min_m, zone.r_max_m])
-        axial_edges.extend([zone.z_min_m, zone.z_max_m])
-
-    radial_edges = _unique_sorted(radial_edges)
-    axial_edges = _unique_sorted(axial_edges)
-
-    blocks: list[MeshBlock] = []
-    for radial_index, (r_min_m, r_max_m) in enumerate(zip(radial_edges[:-1], radial_edges[1:], strict=True), start=1):
-        if r_max_m <= r_min_m:
-            continue
-        r_mid_m = 0.5 * (r_min_m + r_max_m)
-        for axial_index, (z_min_m, z_max_m) in enumerate(zip(axial_edges[:-1], axial_edges[1:], strict=True), start=1):
-            if z_max_m <= z_min_m:
-                continue
-            z_mid_m = 0.5 * (z_min_m + z_max_m)
-            region = "reflector"
-            for zone in overlay_zones:
-                if zone.contains(r_mid_m, z_mid_m):
-                    region = zone.region
-            blocks.append(
-                MeshBlock(
-                    block_id=f"r{radial_index:02d}_z{axial_index:02d}",
-                    region=region,
-                    r_min_m=r_min_m,
-                    r_max_m=r_max_m,
-                    z_min_m=z_min_m,
-                    z_max_m=z_max_m,
-                )
-            )
-    return radial_edges, axial_edges, blocks
-
-
 def write_json(path: Path, payload: dict[str, Any]) -> None:
     with path.open("w", encoding="utf-8") as handle:
         json.dump(payload, handle, indent=2, sort_keys=False)
@@ -540,91 +274,6 @@ def _dictionary_header(object_name: str) -> str:
 
 def _vol_scalar_header(object_name: str) -> str:
     return _foam_header("volScalarField", object_name, version="2")
-
-
-def _zone_names(case_spec: dict[str, Any]) -> list[str]:
-    return list(case_spec["config"]["domain_order"])
-
-
-def _unique_region_names(case_spec: dict[str, Any]) -> list[str]:
-    return [name for name in _zone_names(case_spec) if name in case_spec["materials"]]
-
-
-def _prompt_generation_time(case_spec: dict[str, Any]) -> float:
-    generation_time = case_spec.get("openmc_run", {}).get("generation_time_s")
-    if isinstance(generation_time, dict):
-        mean_value = generation_time.get("mean")
-        if mean_value is not None:
-            return float(mean_value)
-    return 1.0e-6
-
-
-def _prompt_chi(material_payload: dict[str, Any]) -> list[float]:
-    return [float(value) for value in material_payload["group_constants_si"]["chi"]["mean"]]
-
-
-def _delayed_chi(material_payload: dict[str, Any], group_count: int) -> list[float]:
-    delayed_summary = material_payload["delayed_neutrons"]["summary"]
-    raw = [float(value) for value in delayed_summary.get("beta_total_by_energy_group", [])]
-    if len(raw) != group_count:
-        return _prompt_chi(material_payload)
-    total = sum(raw)
-    if total > 0.0:
-        return [value / total for value in raw]
-    return _prompt_chi(material_payload)
-
-
-def _beta_by_precursor_group(material_payload: dict[str, Any], precursor_group_count: int) -> list[float]:
-    values = material_payload["delayed_neutrons"]["summary"].get("beta_total_by_delayed_group", [])
-    return [float(value) for value in values[:precursor_group_count]] + [0.0] * max(0, precursor_group_count - len(values))
-
-
-def _lambda_by_precursor_group(material_payload: dict[str, Any], precursor_group_count: int) -> list[float]:
-    values = material_payload["delayed_neutrons"]["summary"].get("decay_rate_per_s_by_delayed_group", [])
-    return [float(value) for value in values[:precursor_group_count]] + [0.0] * max(0, precursor_group_count - len(values))
-
-
-def _reference_lambda_values(case_spec: dict[str, Any], precursor_group_count: int) -> list[float]:
-    for zone_name in _unique_region_names(case_spec):
-        values = _lambda_by_precursor_group(case_spec["materials"][zone_name], precursor_group_count)
-        if any(value > 0.0 for value in values):
-            return [value if value > 0.0 else 1.0e-6 for value in values]
-    return [1.0e-6] * precursor_group_count
-
-
-def _sanitize_lambda_values(values: list[float], fallback_values: list[float]) -> list[float]:
-    sanitized: list[float] = []
-    for index, value in enumerate(values):
-        if value > 0.0 and math.isfinite(value):
-            sanitized.append(value)
-            continue
-        fallback = fallback_values[index] if index < len(fallback_values) else 1.0e-6
-        sanitized.append(fallback if fallback > 0.0 and math.isfinite(fallback) else 1.0e-6)
-    return sanitized
-
-
-def _sigma_removal(material_payload: dict[str, Any], group_count: int) -> list[float]:
-    absorption = material_payload["group_constants_si"]["absorption"]["mean"]
-    scatter = material_payload["group_constants_si"]["scatter matrix"]["mean"]
-    values: list[float] = []
-    for group_index in range(group_count):
-        scatter_out = sum(float(scatter[group_index][destination]) for destination in range(group_count) if destination != group_index)
-        values.append(float(absorption[group_index]) + scatter_out)
-    positive_values = [value for value in values if value > 0.0 and math.isfinite(value)]
-    replacement = min(positive_values) if positive_values else 1.0e-6
-    return [value if value > 0.0 and math.isfinite(value) else replacement for value in values]
-
-
-def _sigma_pow(material_payload: dict[str, Any]) -> list[float]:
-    return [float(value) for value in material_payload["group_constants_si"]["nu-fission"]["mean"]]
-
-
-def _identity_disc_factors(group_count: int) -> list[float]:
-    return [1.0] * group_count
-
-
-def _unity_integral_flux(group_count: int) -> list[float]:
-    return [1.0] * group_count
 
 
 def build_control_dict_text() -> str:
@@ -723,93 +372,26 @@ def build_default_flux_field_text(object_name: str) -> str:
 
 
 def _zone_block_counts(case_spec: dict[str, Any]) -> dict[str, int]:
-    counts: dict[str, int] = {}
-    mesh_info = case_spec["mesh"]
-    if "blocks" in mesh_info:
-        for block in mesh_info["blocks"]:
-            region = block["region"]
-            counts[region] = counts.get(region, 0) + 1
-        return counts
+    blocks = case_spec["mesh"].get("blocks")
+    if not isinstance(blocks, list):
+        raise ValueError("Expected case_spec['mesh']['blocks'] in the generated Gmsh mesh manifest")
 
-    for mapping in mesh_info.get("region_to_cell_zone", []):
-        region = mapping["region"]
+    counts: dict[str, int] = {}
+    for block in blocks:
+        region = block["region"]
         counts[region] = counts.get(region, 0) + 1
     return counts
 
 
 def build_nuclear_data_text(case_spec: dict[str, Any]) -> str:
-    group_count = int(case_spec["config"]["group_count"])
-    precursor_group_count = len(case_spec["config"]["delayed_groups"])
     zone_counts = _zone_block_counts(case_spec)
-    reference_lambda_values = _reference_lambda_values(case_spec, precursor_group_count)
-    lines = [
-        _dictionary_header("nuclearData").rstrip(),
-        f"promptGenerationTime {_format_number(_prompt_generation_time(case_spec))};",
-        f"precGroups      {precursor_group_count};",
-        f"energyGroups    {group_count};",
-        "",
-        "xsVariables",
-        "{}",
-        "",
-        "states",
-        "(",
-        "    reference",
-        "    {",
-        "        zones",
-        "        (",
-    ]
+    return build_nuclear_data_text_from_openmc_to_foam(
+        xs_payload=case_spec["openmc_to_foam_xs"],
+        domain_order=list(case_spec["config"]["domain_order"]),
+        zone_counts=zone_counts,
+    )
 
-    for zone_name in _unique_region_names(case_spec):
-        material_payload = case_spec["materials"][zone_name]
-        group_constants = material_payload["group_constants_si"]
-        prompt_chi = _prompt_chi(material_payload)
-        delayed_chi = _delayed_chi(material_payload, group_count)
-        removal = _sigma_removal(material_payload, group_count)
-        nu_sigma_eff = [float(value) for value in group_constants["nu-fission"]["mean"]]
-        sigma_pow = _sigma_pow(material_payload)
-        scatter = group_constants["scatter matrix"]["mean"]
-        diffusion = [float(value) for value in group_constants["diffusion-coefficient"]["mean"]]
-        inverse_velocity = [float(value) for value in group_constants["inverse-velocity"]["mean"]]
-        lambda_values = _sanitize_lambda_values(
-            _lambda_by_precursor_group(material_payload, precursor_group_count),
-            reference_lambda_values,
-        )
-        beta_values = _beta_by_precursor_group(material_payload, precursor_group_count)
-        zone_block_count = zone_counts.get(zone_name, 0)
 
-        lines.extend([
-            f"            {zone_name}",
-            "            {",
-            f"                // Populated from {zone_block_count} OpenMC-derived 3D cell zone mapping(s).",
-            "                fuelFraction    1;",
-            f"                sigmaRemoval    nonuniform List<scalar> {group_count} ({_format_scalar_list(removal)});",
-            f"                nuSigmaEff      nonuniform List<scalar> {group_count} ({_format_scalar_list(nu_sigma_eff)});",
-            f"                sigmaPow        nonuniform List<scalar> {group_count} ({_format_scalar_list(sigma_pow)});",
-            f"                scatteringMatrixP0 {group_count} {group_count}",
-            "                (",
-        ])
-        for row in scatter:
-            lines.append(f"                    ( {_format_scalar_list([float(value) for value in row])} )")
-        lines.extend([
-            "                );",
-            f"                discFactor      nonuniform List<scalar> {group_count} ({_format_scalar_list(_identity_disc_factors(group_count))});",
-            f"                chiPrompt       nonuniform List<scalar> {group_count} ({_format_scalar_list(prompt_chi)});",
-            f"                chiDelayed      nonuniform List<scalar> {group_count} ({_format_scalar_list(delayed_chi)});",
-            f"                IV              nonuniform List<scalar> {group_count} ({_format_scalar_list(inverse_velocity)});",
-            f"                D               nonuniform List<scalar> {group_count} ({_format_scalar_list(diffusion)});",
-            f"                integralFlux    nonuniform List<scalar> {group_count} ({_format_scalar_list(_unity_integral_flux(group_count))});",
-            f"                lambda          nonuniform List<scalar> {precursor_group_count} ({_format_scalar_list(lambda_values)});",
-            f"                Beta            nonuniform List<scalar> {precursor_group_count} ({_format_scalar_list(beta_values)});",
-            "            }",
-        ])
-
-    lines.extend([
-        "        );",
-        "    }",
-        ");",
-        "",
-    ])
-    return "\n".join(lines) + "\n"
 def build_allclean_text() -> str:
     return (
         "#!/bin/sh\n"
@@ -905,7 +487,15 @@ def write_openfoam_case(case_spec: dict[str, Any], case_dir: Path) -> dict[str, 
     return output_paths | {"fluxFiles": default_flux_paths}
 
 
-def build_case_spec(mgxs_export_dir: Path, output_dir: Path) -> dict[str, Any]:
+def build_case_spec(
+    mgxs_export_dir: Path,
+    output_dir: Path,
+    openmc_to_foam_tool_root: Path | None = None,
+    openmc_particles: int | None = None,
+    openmc_batches: int | None = None,
+    openmc_inactive: int | None = None,
+    openmc_threads: int | None = None,
+) -> dict[str, Any]:
     mgxs_export_dir = require_dir(mgxs_export_dir)
     model_xml_path = require_file(mgxs_export_dir / "reactor_run" / "model.xml")
     mgxs_json_path = require_file(mgxs_export_dir / "outputs" / "mgxs_constants.json")
@@ -929,12 +519,23 @@ def build_case_spec(mgxs_export_dir: Path, output_dir: Path) -> dict[str, Any]:
         domain_label: build_material_payload(export, domain_label)
         for domain_label in domain_order
     }
+    openmc_to_foam_output_dir = output_dir / DEFAULT_OPENMCTOFOAM_OUTPUT_SUBDIR
+    openmc_to_foam_xs = generate_openmc_to_foam_xs(
+        mgxs_export_dir=mgxs_export_dir,
+        output_dir=openmc_to_foam_output_dir,
+        tool_root=openmc_to_foam_tool_root,
+        particles=openmc_particles,
+        batches=openmc_batches,
+        inactive=openmc_inactive,
+        threads=openmc_threads,
+    )
 
     return {
         "source": {
             "mgxs_export_dir": str(mgxs_export_dir),
             "model_xml_path": str(model_xml_path),
             "mgxs_constants_json": str(mgxs_json_path),
+            "openmc_to_foam_summary": openmc_to_foam_xs["files"]["summary"],
         },
         "config": {
             "group_count": len(export["config"]["energy_group_edges_ev"]) - 1,
@@ -948,6 +549,7 @@ def build_case_spec(mgxs_export_dir: Path, output_dir: Path) -> dict[str, Any]:
         "mesh": mesh_info,
         "materials": materials,
         "openmc_run": export.get("run", {}),
+        "openmc_to_foam_xs": openmc_to_foam_xs,
     }
 
 
@@ -959,6 +561,9 @@ def write_case_outputs(case_spec: dict[str, Any], output_dir: Path) -> dict[str,
         "mesh_file": output_dir / "concentric_reactor_wedge.msh",
         "zones_csv": output_dir / "concentric_mesh_regions.csv",
         "materials": output_dir / "concentric_materials.json",
+        "openmc_to_foam_summary": Path(case_spec["openmc_to_foam_xs"]["files"]["summary"]),
+        "openmc_to_foam_raw_nuclear_data": Path(case_spec["openmc_to_foam_xs"]["files"]["raw_nuclear_data"]),
+        "openmc_to_foam_adapted_nuclear_data": Path(case_spec["openmc_to_foam_xs"]["files"]["adapted_nuclear_data"]),
     }
     write_mesh_assets(
         mesh_file=files["mesh_file"],
@@ -991,12 +596,50 @@ def parse_args() -> argparse.Namespace:
         default=DEFAULT_OUTPUT_DIR,
         help="Directory where generated case metadata should be written",
     )
+    parser.add_argument(
+        "--openmc-to-foam-tool-root",
+        type=Path,
+        default=None,
+        help="Optional path to the openmcToFoam checkout if MultiGroupXS is not installed in the active environment",
+    )
+    parser.add_argument(
+        "--openmc-particles",
+        type=int,
+        default=None,
+        help="Optional override for the OpenMC particle count used by the openmcToFoam XS source run",
+    )
+    parser.add_argument(
+        "--openmc-batches",
+        type=int,
+        default=None,
+        help="Optional override for the OpenMC batch count used by the openmcToFoam XS source run",
+    )
+    parser.add_argument(
+        "--openmc-inactive",
+        type=int,
+        default=None,
+        help="Optional override for the OpenMC inactive batch count used by the openmcToFoam XS source run",
+    )
+    parser.add_argument(
+        "--openmc-threads",
+        type=int,
+        default=None,
+        help="Optional override for the OpenMC thread count used by the openmcToFoam XS source run",
+    )
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
-    case_spec = build_case_spec(args.mgxs_export_dir, args.output_dir)
+    case_spec = build_case_spec(
+        args.mgxs_export_dir,
+        args.output_dir,
+        openmc_to_foam_tool_root=args.openmc_to_foam_tool_root,
+        openmc_particles=args.openmc_particles,
+        openmc_batches=args.openmc_batches,
+        openmc_inactive=args.openmc_inactive,
+        openmc_threads=args.openmc_threads,
+    )
     files = write_case_outputs(case_spec, args.output_dir)
     openfoam_files = write_openfoam_case(case_spec, CASE_DIR)
 
@@ -1012,6 +655,7 @@ def main() -> None:
             {
                 "group_count": case_spec["config"]["group_count"],
                 "mesh_region_count": len(case_spec["mesh_regions"]),
+                "openmc_to_foam_keff": case_spec["openmc_to_foam_xs"]["reference_run"]["keff"],
                 "output_files": {name: str(path) for name, path in files.items()},
                 "openfoam_case_files": rendered_openfoam_files,
             },

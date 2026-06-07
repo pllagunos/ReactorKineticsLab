@@ -1,6 +1,8 @@
 # Reactor Kinetics Lab
 
-A local reactor simulator modeled with montecarlo OpenMC which runs a point kinetics and diffusion solver coupled to a modelica based thermal-hydraulics module.
+A web-based reactor simulator which runs a point kinetics and diffusion solver python backend coupled to a modelica based thermal-hydraulics module.
+
+The reactor is modeled with montecarlo OpenMC software.
 
 The current version models a simplified **heavy-water-moderated natural uranium fueled core** with one operator control: **control rod insertion**. The browser dashboard shows how **reactivity**, **total neutron flux**, **thermal power** and **coolant temperatures** evolve over time.
 
