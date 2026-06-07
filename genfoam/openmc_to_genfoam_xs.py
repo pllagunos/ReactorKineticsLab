@@ -3,14 +3,12 @@ from __future__ import annotations
 import json
 import math
 import os
-import sys
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 import openmc
-
-# where is the 'from MultiGroupXS import *' ?
+from MultiGroupXS import MultiGroupXS, MultiGroupXSManager
 
 
 CM_TO_M = 1.0e-2
@@ -66,36 +64,6 @@ def _foam_header(class_name: str, object_name: str, version: str = "2.0") -> str
 
 def _dictionary_header(object_name: str) -> str:
     return _foam_header("dictionary", object_name)
-
-
-def resolve_tool_root(tool_root: Path | None) -> Path | None:
-    if tool_root is not None:
-        return tool_root
-    configured = os.environ.get("OPENMCTOFOAM_ROOT")
-    if configured:
-        return Path(configured)
-    return None
-
-
-def _load_openmc_to_foam(tool_root: Path | None) -> tuple[Any, Any]:
-    resolved_tool_root = resolve_tool_root(tool_root)
-    if resolved_tool_root is not None:
-        if not resolved_tool_root.exists():
-            raise FileNotFoundError(f"Could not find openmcToFoam tool root: {resolved_tool_root}")
-        if not (resolved_tool_root / "MultiGroupXS").exists():
-            raise FileNotFoundError(f"Could not find MultiGroupXS package under {resolved_tool_root}")
-        sys.path.insert(0, str(resolved_tool_root))
-
-    try:
-        from MultiGroupXS import MultiGroupXS, MultiGroupXSManager  # type: ignore
-    except ModuleNotFoundError as exc:
-        raise ModuleNotFoundError(
-            "Could not import openmcToFoam's MultiGroupXS package. "
-            "Install it in the active Python environment, set OPENMCTOFOAM_ROOT, "
-            "or pass --openmc-to-foam-tool-root /path/to/openmcToFoam."
-        ) from exc
-
-    return MultiGroupXS, MultiGroupXSManager
 
 
 def _build_reference_manager(
@@ -337,7 +305,6 @@ def build_nuclear_data_text_from_openmc_to_foam(
 def generate_openmc_to_foam_xs(
     mgxs_export_dir: Path,
     output_dir: Path,
-    tool_root: Path | None = None,
     particles: int | None = None,
     batches: int | None = None,
     inactive: int | None = None,
@@ -352,7 +319,6 @@ def generate_openmc_to_foam_xs(
     if not model_xml_path.exists():
         raise FileNotFoundError(f"Could not find OpenMC model XML at {model_xml_path}")
 
-    MultiGroupXS, MultiGroupXSManager = _load_openmc_to_foam(tool_root)
     openmc.reset_auto_ids()
     model = openmc.Model.from_model_xml(model_xml_path)
     settings = model.settings
@@ -409,7 +375,6 @@ def generate_openmc_to_foam_xs(
         "source": {
             "mgxs_export_dir": str(mgxs_export_dir),
             "model_xml_path": str(model_xml_path.resolve()),
-            "tool_root": str(resolve_tool_root(tool_root)) if resolve_tool_root(tool_root) is not None else None,
         },
         "config": {
             "group_count": len(export["config"]["energy_group_edges_ev"]) - 1,

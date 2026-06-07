@@ -39,7 +39,6 @@ def _compare_vectors(reference: list[float], current: list[float]) -> dict[str, 
 def run_comparison(
     mgxs_export_dir: Path,
     output_dir: Path,
-    tool_root: Path | None,
     particles: int | None,
     batches: int | None,
     inactive: int | None,
@@ -49,7 +48,6 @@ def run_comparison(
     xs_payload = generate_openmc_to_foam_xs(
         mgxs_export_dir=mgxs_export_dir,
         output_dir=xs_output_dir,
-        tool_root=tool_root,
         particles=particles,
         batches=batches,
         inactive=inactive,
@@ -77,7 +75,6 @@ def run_comparison(
     comparison_path.write_text(json.dumps(comparison, indent=2) + "\n", encoding="utf-8")
     summary = {
         "mgxs_export_dir": str(mgxs_export_dir),
-        "tool_root": str(tool_root) if tool_root is not None else None,
         "reference_run": xs_payload["reference_run"],
         "xs_summary_path": xs_payload["files"]["summary"],
         "raw_vectors_path": xs_payload["files"]["raw_vectors"],
@@ -94,7 +91,6 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--mgxs-export-dir", type=Path, default=DEFAULT_MGXS_EXPORT_DIR)
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_REFERENCE_OUTPUT_DIR)
-    parser.add_argument("--tool-root", type=Path, default=None)
     parser.add_argument("--particles", type=int, default=None)
     parser.add_argument("--batches", type=int, default=None)
     parser.add_argument("--inactive", type=int, default=None)
@@ -107,7 +103,6 @@ def main() -> None:
     summary = run_comparison(
         mgxs_export_dir=args.mgxs_export_dir.resolve(),
         output_dir=args.output_dir.resolve(),
-        tool_root=args.tool_root.resolve() if args.tool_root is not None else None,
         particles=args.particles,
         batches=args.batches,
         inactive=args.inactive,

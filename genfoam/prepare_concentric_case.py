@@ -237,17 +237,6 @@ def write_text(path: Path, content: str) -> None:
     with path.open("w", encoding="utf-8") as handle:
         handle.write(content)
 
-
-def _format_number(value: float) -> str:
-    if value == 0.0:
-        return "0"
-    return f"{float(value):.12g}"
-
-
-def _format_scalar_list(values: list[float]) -> str:
-    return " ".join(_format_number(value) for value in values)
-
-
 def _foam_header(class_name: str, object_name: str, version: str = "2.0") -> str:
     return (
         "/*--------------------------------*- C++ -*----------------------------------*\\\n"
@@ -268,92 +257,8 @@ def _foam_header(class_name: str, object_name: str, version: str = "2.0") -> str
     )
 
 
-def _dictionary_header(object_name: str) -> str:
-    return _foam_header("dictionary", object_name)
-
-
 def _vol_scalar_header(object_name: str) -> str:
     return _foam_header("volScalarField", object_name, version="2")
-
-
-def build_control_dict_text() -> str:
-    return (
-        _dictionary_header("controlDict")
-        + "application     GeN-Foam;\n\n"
-        + "startFrom       latestTime;\n\n"
-        + "stopAt          endTime;\n\n"
-        + "endTime         1;\n\n"
-        + "deltaT          1e-09;\n\n"
-        + "writeControl    adjustableRunTime;\n\n"
-        + "writeInterval   1;\n\n"
-        + "purgeWrite      0;\n\n"
-        + "writeFormat     ascii;\n\n"
-        + "writePrecision  8;\n\n"
-        + "writeCompression false;\n\n"
-        + "timeFormat      general;\n\n"
-        + "timePrecision   8;\n\n"
-        + "runTimeModifiable true;\n\n"
-        + "removeBaffles\n{\n    neutroRegion     false;\n}\n\n"
-        + "adjustTimeStep  true;\n\n"
-        + "maxDeltaT       1;\n\n"
-        + "maxCo           5;\n\n"
-        + "maxPowerVariation 0.01;\n\n"
-    )
-
-
-def build_regions_dict_text() -> str:
-    return (
-        _dictionary_header("regionsDict")
-        + "regionSolvers\n{\n    Level_0\n    {\n        neutroRegion     diffusionNeutronics;\n    }\n}\n\n"
-        + "mappings\n{\n    neutroRegion\n    {\n    }\n}\n\n"
-    )
-
-
-def build_fv_schemes_text() -> str:
-    return (
-        _dictionary_header("fvSchemes")
-        + "ddtSchemes\n{\n    default         steadyState;\n}\n\n"
-        + "gradSchemes\n{\n    default         Gauss linear;\n}\n\n"
-        + "divSchemes\n{\n    default         Gauss linear;\n    \"div(facePhi_,angularFlux_)\"   Gauss upwind;\n}\n\n"
-        + "laplacianSchemes\n{\n   default         Gauss linear corrected;\n}\n\n"
-        + "interpolationSchemes\n{\n    default         linear;\n}\n\n"
-        + "snGradSchemes\n{\n    default         corrected;\n}\n\n"
-        + "fluxRequired\n{\n    default         false;\n}\n\n"
-    )
-
-
-def build_fv_solution_text() -> str:
-    return (
-        _dictionary_header("fvSolution")
-        + "solvers\n{\n"
-        + "    \"prec.*|precStar.*|adjoint_prec.*\"\n"
-        + "    {\n        solver           PBiCG;\n        preconditioner   DILU;\n        tolerance        1e-6;\n        relTol           1e-3;\n    }\n"
-        + "    \"flux.*|adjoint_flux.*\"\n"
-        + "    {\n        solver          PCG;\n        preconditioner  DIC;\n        tolerance       1e-6;\n        relTol          1e-3;\n    }\n"
-        + "    \"angularFlux.*\"\n"
-        + "    {\n        solver          PBiCGStab;\n        preconditioner  DILU;\n        tolerance       1e-7;\n        relTol          1e-1;\n    }\n"
-        + "}\n\n"
-        + "neutronTransport\n{\n"
-        + "    integralPredictor           false;\n"
-        + "    implicitPredictor           false;\n"
-        + "    ROMAcceleration             false;\n"
-        + "    aitkenAcceleration          false;\n"
-        + "    neutronIterationResidual    0.000001;\n"
-        + "    maxNeutronIterations        50;\n"
-        + "}\n\n"
-    )
-
-
-def build_neutronics_properties_text() -> str:
-    return (
-        _dictionary_header("neutronicsProperties")
-        + "eigenvalueNeutronics        true;\n\n"
-        + "externalSourceNeutronics    false;\n\n"
-        + "fastNeutrons                true;\n\n"
-        + "adjustDiscFactors           false;\n\n"
-        + "useGivenDiscFactors         false;\n\n"
-    )
-
 
 def build_default_flux_field_text(object_name: str) -> str:
     return (
@@ -392,71 +297,13 @@ def build_nuclear_data_text(case_spec: dict[str, Any]) -> str:
     )
 
 
-def build_allclean_text() -> str:
-    return (
-        "#!/bin/sh\n"
-        "cd ${0%/*} || exit 1\n\n"
-        "rm -rf 0.0 [1-9]* constant/neutroRegion/polyMesh\n"
-        "rm -rf log.* *.log *.out\n"
-    )
-
-
-def build_allmesh_text() -> str:
-    mesh_file = Path("constant/generated/concentric_reactor_wedge.msh")
-    mesh_manifest = Path("constant/generated/concentric_reactor_mesh_manifest.json")
-    return (
-        "#!/bin/sh\n"
-        "cd ${0%/*} || exit 1\n\n"
-        ". $WM_PROJECT_DIR/bin/tools/RunFunctions\n\n"
-        "rm -rf log.gmshGenerate log.gmshToFoam log.configureMesh log.checkMesh log.validateMesh\n"
-        "rm -rf constant/neutroRegion/polyMesh\n"
-        f"runApplication -s log.gmshGenerate conda run -n openmc python gmsh_reactor_mesh.py generate --mesh-kind {WEDGE_MESH_KIND} --mesh-file {mesh_file} --manifest-file {mesh_manifest}\n"
-        f"runApplication -s log.gmshToFoam gmshToFoam -case . -region neutroRegion {mesh_file}\n"
-        f"runApplication -s log.configureMesh conda run -n openmc python gmsh_reactor_mesh.py configure-import --case-dir . --region neutroRegion --manifest-file {mesh_manifest}\n"
-        "runApplication checkMesh -case . -region neutroRegion\n"
-        f"runApplication -s log.validateMesh conda run -n openmc python gmsh_reactor_mesh.py validate-import --case-dir . --region neutroRegion --manifest-file {mesh_manifest}\n"
-    )
-
-
-def build_allrun_text() -> str:
-    return (
-        "#!/bin/sh\n"
-        "cd ${0%/*} || exit 1\n\n"
-        ". $WM_PROJECT_DIR/bin/tools/RunFunctions\n\n"
-        "./Allmesh || exit 1\n"
-        "runApplication GeN-Foam -case .\n"
-    )
-
-
-def write_openfoam_case(case_spec: dict[str, Any], case_dir: Path) -> dict[str, Any]:
+def write_generated_case_files(case_spec: dict[str, Any], case_dir: Path) -> dict[str, Any]:
     group_count = int(case_spec["config"]["group_count"])
     output_paths = {
-        "controlDict": case_dir / "system" / "controlDict",
-        "regionsDict": case_dir / "system" / "regionsDict",
-        "fvSchemes": case_dir / "system" / "neutroRegion" / "fvSchemes",
-        "fvSolution": case_dir / "system" / "neutroRegion" / "fvSolution",
-        "neutronicsProperties": case_dir / "constant" / "neutroRegion" / "neutronicsProperties",
         "nuclearData": case_dir / "constant" / "neutroRegion" / "nuclearData",
-        "Allclean": case_dir / "Allclean",
-        "Allmesh": case_dir / "Allmesh",
-        "Allrun": case_dir / "Allrun",
     }
 
-    write_text(output_paths["controlDict"], build_control_dict_text())
-    write_text(output_paths["regionsDict"], build_regions_dict_text())
-    write_text(output_paths["fvSchemes"], build_fv_schemes_text())
-    write_text(output_paths["fvSolution"], build_fv_solution_text())
-    write_text(output_paths["neutronicsProperties"], build_neutronics_properties_text())
     write_text(output_paths["nuclearData"], build_nuclear_data_text(case_spec))
-    write_text(output_paths["Allclean"], build_allclean_text())
-    write_text(output_paths["Allmesh"], build_allmesh_text())
-    write_text(output_paths["Allrun"], build_allrun_text())
-    for script_name in ("Allclean", "Allmesh", "Allrun"):
-        output_paths[script_name].chmod(0o755)
-
-    legacy_block_mesh = case_dir / "system" / "neutroRegion" / "blockMeshDict"
-    if legacy_block_mesh.exists():
-        legacy_block_mesh.unlink()
 
     uniform_dir = case_dir / "0" / "uniform"
     uniform_dir.mkdir(parents=True, exist_ok=True)
@@ -490,7 +337,6 @@ def write_openfoam_case(case_spec: dict[str, Any], case_dir: Path) -> dict[str, 
 def build_case_spec(
     mgxs_export_dir: Path,
     output_dir: Path,
-    openmc_to_foam_tool_root: Path | None = None,
     openmc_particles: int | None = None,
     openmc_batches: int | None = None,
     openmc_inactive: int | None = None,
@@ -523,7 +369,6 @@ def build_case_spec(
     openmc_to_foam_xs = generate_openmc_to_foam_xs(
         mgxs_export_dir=mgxs_export_dir,
         output_dir=openmc_to_foam_output_dir,
-        tool_root=openmc_to_foam_tool_root,
         particles=openmc_particles,
         batches=openmc_batches,
         inactive=openmc_inactive,
@@ -597,12 +442,6 @@ def parse_args() -> argparse.Namespace:
         help="Directory where generated case metadata should be written",
     )
     parser.add_argument(
-        "--openmc-to-foam-tool-root",
-        type=Path,
-        default=None,
-        help="Optional path to the openmcToFoam checkout if MultiGroupXS is not installed in the active environment",
-    )
-    parser.add_argument(
         "--openmc-particles",
         type=int,
         default=None,
@@ -634,21 +473,20 @@ def main() -> None:
     case_spec = build_case_spec(
         args.mgxs_export_dir,
         args.output_dir,
-        openmc_to_foam_tool_root=args.openmc_to_foam_tool_root,
         openmc_particles=args.openmc_particles,
         openmc_batches=args.openmc_batches,
         openmc_inactive=args.openmc_inactive,
         openmc_threads=args.openmc_threads,
     )
     files = write_case_outputs(case_spec, args.output_dir)
-    openfoam_files = write_openfoam_case(case_spec, CASE_DIR)
+    generated_case_files = write_generated_case_files(case_spec, CASE_DIR)
 
-    rendered_openfoam_files: dict[str, Any] = {}
-    for name, value in openfoam_files.items():
+    rendered_generated_case_files: dict[str, Any] = {}
+    for name, value in generated_case_files.items():
         if isinstance(value, list):
-            rendered_openfoam_files[name] = value
+            rendered_generated_case_files[name] = value
         else:
-            rendered_openfoam_files[name] = str(value)
+            rendered_generated_case_files[name] = str(value)
 
     print(
         json.dumps(
@@ -657,7 +495,7 @@ def main() -> None:
                 "mesh_region_count": len(case_spec["mesh_regions"]),
                 "openmc_to_foam_keff": case_spec["openmc_to_foam_xs"]["reference_run"]["keff"],
                 "output_files": {name: str(path) for name, path in files.items()},
-                "openfoam_case_files": rendered_openfoam_files,
+                "generated_case_files": rendered_generated_case_files,
             },
             indent=2,
         )

@@ -17,7 +17,7 @@ The current implementation uses the structure of the GeN-Foam `2D_externalSource
 - uses `openmcToFoam` / `MultiGroupXS` as the neutronics cross-section source of truth
 - adapts the `openmcToFoam` outputs into the current GeN-Foam `states(reference { zones (...) })` format
 - preserves only the local sanitization still needed for inactive-group diffusion, zero-removal, and non-finite field cleanup
-- writes the corresponding GeN-Foam case files for the imported wedge mesh
+- updates only the generated case artifacts while leaving the stable OpenFOAM dictionaries and run scripts checked in as static files
 
 `openmc/build/concentric/reactor_run/model.xml` is still required as a reference artifact in the upstream export, but the current `genfoam` workflow does not parse it automatically.
 
@@ -36,7 +36,6 @@ Optional arguments:
 python genfoam/prepare_concentric_case.py \
   --mgxs-export-dir openmc/build/concentric/mgxs_export \
   --output-dir genfoam/constant/generated \
-  --openmc-to-foam-tool-root /path/to/openmcToFoam \
   --openmc-particles 2000 \
   --openmc-batches 12 \
   --openmc-inactive 4
@@ -55,12 +54,16 @@ The script writes the following metadata files under `genfoam/constant/generated
 - `openmc_to_foam_xs/nuclearData.openmcToFoam` — raw legacy `openmcToFoam` output retained for inspection
 - `openmc_to_foam_xs/nuclearData.genfoam` — adapted GeN-Foam `states/reference` nuclear data generated from the `openmcToFoam` source
 
-It also writes the active GeN-Foam case files in place:
+It also updates the generated GeN-Foam case files in place:
+
+- `constant/neutroRegion/nuclearData`
+- `0/neutroRegion/defaultFlux` through `defaultFlux16`
+
+The following files are now treated as static checked-in case scaffolding:
 
 - `system/controlDict`, `system/regionsDict`
 - `system/neutroRegion/fvSchemes`, `fvSolution`
-- `constant/neutroRegion/neutronicsProperties`, `nuclearData`
-- `0/neutroRegion/defaultFlux` through `defaultFlux16`
+- `constant/neutroRegion/neutronicsProperties`
 - `Allclean`, `Allmesh`, `Allrun`
 
 The old `blockMeshDict` path is retired from the active workflow. The earlier full-3D Gmsh path remains experimental only and is not used by `Allmesh` or `Allrun`.
@@ -132,7 +135,7 @@ The helper below reruns the same `openmcToFoam` source path and compares the raw
 conda run -n openmc python genfoam/openmc_to_foam_reference.py
 ```
 
-If `MultiGroupXS` is not importable in the active Python environment, pass `--tool-root /path/to/openmcToFoam` or set `OPENMCTOFOAM_ROOT`.
+`MultiGroupXS` must be installed in the active `openmc` environment. The local scripts now import it directly and fail immediately if that dependency is missing.
 
 Outputs are written under `genfoam/constant/generated/openmc_to_foam_reference/`.
 
