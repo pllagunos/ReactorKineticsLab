@@ -17,9 +17,9 @@ from gmsh_reactor_mesh import (
     write_mesh_assets,
 )
 from openmc_to_genfoam_xs import (
-    DEFAULT_OUTPUT_SUBDIR as DEFAULT_OPENMCTOFOAM_OUTPUT_SUBDIR,
-    build_nuclear_data_text_from_openmc_to_foam,
-    generate_openmc_to_foam_xs,
+    DEFAULT_OUTPUT_SUBDIR as DEFAULT_GENFOAM_XS_OUTPUT_SUBDIR,
+    build_nuclear_data_text_from_export,
+    generate_genfoam_xs,
 )
 
 
@@ -27,6 +27,8 @@ CASE_DIR = Path(__file__).resolve().parent
 PROJECT_DIR = CASE_DIR.parent
 DEFAULT_MGXS_EXPORT_DIR = PROJECT_DIR / "openmc" / "build" / "concentric" / "mgxs_export"
 DEFAULT_OUTPUT_DIR = CASE_DIR / "constant" / "generated"
+CM_TO_M = 1.0e-2
+EV_TO_J = 1.602176487e-19
 
 
 def require_dir(path: Path) -> Path:
@@ -136,7 +138,6 @@ def convert_group_constants_to_si(domain_label: str, group_constants: dict[str, 
         "transport": 100.0,
         "absorption": 100.0,
         "nu-fission": 100.0,
-        "kappa-fission": 100.0,
         "inverse-velocity": 100.0,
     }
 
@@ -170,6 +171,13 @@ def convert_group_constants_to_si(domain_label: str, group_constants: dict[str, 
                 "mean": inverse_velocity_override,
                 "std_dev": _deep_scale(std_dev_value, 100.0),
                 "units": "s/m",
+            }
+            continue
+        if xs_type == "kappa-fission":
+            converted[xs_type] = {
+                "mean": _deep_scale(mean_value, EV_TO_J / CM_TO_M),
+                "std_dev": _deep_scale(std_dev_value, EV_TO_J / CM_TO_M),
+                "units": "J/m",
             }
             continue
 
@@ -290,8 +298,8 @@ def _zone_block_counts(case_spec: dict[str, Any]) -> dict[str, int]:
 
 def build_nuclear_data_text(case_spec: dict[str, Any]) -> str:
     zone_counts = _zone_block_counts(case_spec)
-    return build_nuclear_data_text_from_openmc_to_foam(
-        xs_payload=case_spec["openmc_to_foam_xs"],
+    return build_nuclear_data_text_from_export(
+        xs_payload=case_spec["genfoam_xs"],
         domain_order=list(case_spec["config"]["domain_order"]),
         zone_counts=zone_counts,
     )
@@ -337,10 +345,12 @@ def write_generated_case_files(case_spec: dict[str, Any], case_dir: Path) -> dic
 def build_case_spec(
     mgxs_export_dir: Path,
     output_dir: Path,
+    rerun_mgxs: bool = False,
     openmc_particles: int | None = None,
     openmc_batches: int | None = None,
     openmc_inactive: int | None = None,
     openmc_threads: int | None = None,
+    legendre_order: int | None = None,
 ) -> dict[str, Any]:
     mgxs_export_dir = require_dir(mgxs_export_dir)
     model_xml_path = require_file(mgxs_export_dir / "reactor_run" / "model.xml")
@@ -365,14 +375,16 @@ def build_case_spec(
         domain_label: build_material_payload(export, domain_label)
         for domain_label in domain_order
     }
-    openmc_to_foam_output_dir = output_dir / DEFAULT_OPENMCTOFOAM_OUTPUT_SUBDIR
-    openmc_to_foam_xs = generate_openmc_to_foam_xs(
+    genfoam_xs_output_dir = output_dir / DEFAULT_GENFOAM_XS_OUTPUT_SUBDIR
+    genfoam_xs = generate_genfoam_xs(
         mgxs_export_dir=mgxs_export_dir,
-        output_dir=openmc_to_foam_output_dir,
+        output_dir=genfoam_xs_output_dir,
+        rerun_mgxs=rerun_mgxs,
         particles=openmc_particles,
         batches=openmc_batches,
         inactive=openmc_inactive,
         threads=openmc_threads,
+        legendre_order=legendre_order,
     )
 
     return {
@@ -380,7 +392,7 @@ def build_case_spec(
             "mgxs_export_dir": str(mgxs_export_dir),
             "model_xml_path": str(model_xml_path),
             "mgxs_constants_json": str(mgxs_json_path),
-            "openmc_to_foam_summary": openmc_to_foam_xs["files"]["summary"],
+            "genfoam_xs_summary": genfoam_xs["files"]["summary"],
         },
         "config": {
             "group_count": len(export["config"]["energy_group_edges_ev"]) - 1,
@@ -394,7 +406,7 @@ def build_case_spec(
         "mesh": mesh_info,
         "materials": materials,
         "openmc_run": export.get("run", {}),
-        "openmc_to_foam_xs": openmc_to_foam_xs,
+        "genfoam_xs": genfoam_xs,
     }
 
 
@@ -406,9 +418,8 @@ def write_case_outputs(case_spec: dict[str, Any], output_dir: Path) -> dict[str,
         "mesh_file": output_dir / "concentric_reactor_wedge.msh",
         "zones_csv": output_dir / "concentric_mesh_regions.csv",
         "materials": output_dir / "concentric_materials.json",
-        "openmc_to_foam_summary": Path(case_spec["openmc_to_foam_xs"]["files"]["summary"]),
-        "openmc_to_foam_raw_nuclear_data": Path(case_spec["openmc_to_foam_xs"]["files"]["raw_nuclear_data"]),
-        "openmc_to_foam_adapted_nuclear_data": Path(case_spec["openmc_to_foam_xs"]["files"]["adapted_nuclear_data"]),
+        "genfoam_xs_summary": Path(case_spec["genfoam_xs"]["files"]["summary"]),
+        "genfoam_xs_adapted_nuclear_data": Path(case_spec["genfoam_xs"]["files"]["adapted_nuclear_data"]),
     }
     write_mesh_assets(
         mesh_file=files["mesh_file"],
@@ -442,41 +453,64 @@ def parse_args() -> argparse.Namespace:
         help="Directory where generated case metadata should be written",
     )
     parser.add_argument(
+        "--rerun-mgxs",
+        action="store_true",
+        help="Re-run the MGXS export through openmc/mgxs_export.py instead of using the existing mgxs_constants.json",
+    )
+    parser.add_argument(
         "--openmc-particles",
         type=int,
         default=None,
-        help="Optional override for the OpenMC particle count used by the openmcToFoam XS source run",
+        help="Optional override for the MGXS rerun particle count",
     )
     parser.add_argument(
         "--openmc-batches",
         type=int,
         default=None,
-        help="Optional override for the OpenMC batch count used by the openmcToFoam XS source run",
+        help="Optional override for the MGXS rerun batch count",
     )
     parser.add_argument(
         "--openmc-inactive",
         type=int,
         default=None,
-        help="Optional override for the OpenMC inactive batch count used by the openmcToFoam XS source run",
+        help="Optional override for the MGXS rerun inactive batch count",
     )
     parser.add_argument(
         "--openmc-threads",
         type=int,
         default=None,
-        help="Optional override for the OpenMC thread count used by the openmcToFoam XS source run",
+        help="Optional override for the MGXS rerun thread count",
+    )
+    parser.add_argument(
+        "--legendre-order",
+        type=int,
+        default=None,
+        help="Optional Legendre scattering order for the MGXS rerun path",
     )
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
+    rerun_mgxs = args.rerun_mgxs or any(
+        value is not None
+        for value in (
+            args.openmc_particles,
+            args.openmc_batches,
+            args.openmc_inactive,
+            args.openmc_threads,
+            args.legendre_order,
+        )
+    )
     case_spec = build_case_spec(
         args.mgxs_export_dir,
         args.output_dir,
+        rerun_mgxs=rerun_mgxs,
         openmc_particles=args.openmc_particles,
         openmc_batches=args.openmc_batches,
         openmc_inactive=args.openmc_inactive,
         openmc_threads=args.openmc_threads,
+        legendre_order=args.legendre_order,
     )
     files = write_case_outputs(case_spec, args.output_dir)
     generated_case_files = write_generated_case_files(case_spec, CASE_DIR)
@@ -493,7 +527,7 @@ def main() -> None:
             {
                 "group_count": case_spec["config"]["group_count"],
                 "mesh_region_count": len(case_spec["mesh_regions"]),
-                "openmc_to_foam_keff": case_spec["openmc_to_foam_xs"]["reference_run"]["keff"],
+                "xs_source_keff": case_spec["genfoam_xs"]["reference_run"]["keff"],
                 "output_files": {name: str(path) for name, path in files.items()},
                 "generated_case_files": rendered_generated_case_files,
             },

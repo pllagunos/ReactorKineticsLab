@@ -37,7 +37,7 @@ DEFAULT_DOMAIN_DEFINITIONS = (
 
 SUPPORTED_CORE_MODELING = ("supercell", "resolved")
 _FUEL_RING_NAME_PATTERN = re.compile(r"^fuel_ring_(\d+)$")
-SUPPORTED_LEGENDRE_ORDERS = (0, 1, 3)
+SUPPORTED_LEGENDRE_ORDERS = (0, 1, 3, 5)
 SUPPORTED_SCATTERING_MOMENTS = tuple(f"P{order}" for order in SUPPORTED_LEGENDRE_ORDERS)
 
 DEFAULT_ENERGY_GROUP_EDGES_EV = (0.0, 20.0e6)
@@ -362,6 +362,10 @@ def attach_mgxs_tallies(
     mgxs.Library,
     dict[str, mgxs.Beta],
     dict[str, mgxs.DecayRate],
+    dict[str, mgxs.ChiDelayed],
+    dict[str, openmc.Tally],
+    openmc.Tally,
+    openmc.Tally,
     dict[str, openmc.Cell],
     dict[str, Any],
 ]:
@@ -404,6 +408,15 @@ def attach_mgxs_tallies(
         )
         for label, domain in domains.items()
     }
+    chi_delayed_by_domain = {
+        label: mgxs.ChiDelayed(
+            domain=domain,
+            domain_type="cell",
+            energy_groups=energy_groups,
+            name=f"{label}-chi-delayed",
+        )
+        for label, domain in domains.items()
+    }
     decay_rate_by_domain = {
         label: mgxs.DecayRate(
             domain=domain,
@@ -414,12 +427,37 @@ def attach_mgxs_tallies(
         )
         for label, domain in domains.items()
     }
-    for kinetics_xs in [*beta_by_domain.values(), *decay_rate_by_domain.values()]:
+    for kinetics_xs in [*beta_by_domain.values(), *chi_delayed_by_domain.values(), *decay_rate_by_domain.values()]:
         for tally in kinetics_xs.tallies.values():
             tallies.append(tally, merge=True)
 
+    integral_flux_by_domain = {}
+    energy_filter = openmc.EnergyFilter(np.asarray(config.energy_group_edges_ev, dtype=float))
+    for label, domain in domains.items():
+        tally = openmc.Tally(name=f"{label}-integral-flux")
+        tally.filters = [energy_filter, openmc.CellFilter(domain)]
+        tally.scores = ["flux"]
+        # Keep these auxiliary tallies distinct so they can be recovered by name
+        # during the optional MGXS rerun path used by the GeN-Foam writer.
+        tallies.append(tally, merge=False)
+        integral_flux_by_domain[label] = tally
+
+    root_universe = geometry.root_universe
+    master_flux_tally = openmc.Tally(name="master-integral-flux")
+    master_flux_tally.filters = [energy_filter, openmc.UniverseFilter(root_universe)]
+    master_flux_tally.scores = ["flux"]
+    tallies.append(master_flux_tally, merge=False)
+
+    prompt_generation_time_tally = openmc.Tally(name="prompt-generation-time")
+    prompt_generation_time_tally.filters = [
+        openmc.EnergyFilter([0.0, 20.0e6]),
+        openmc.UniverseFilter(root_universe),
+    ]
+    prompt_generation_time_tally.scores = ["inverse-velocity"]
+    tallies.append(prompt_generation_time_tally, merge=False)
+
     model.tallies = tallies
-    return library, beta_by_domain, decay_rate_by_domain, domains, {
+    return library, beta_by_domain, decay_rate_by_domain, chi_delayed_by_domain, integral_flux_by_domain, master_flux_tally, prompt_generation_time_tally, domains, {
         "domains": {
             label: {
                 "domain_id": domain.id,
@@ -431,6 +469,12 @@ def attach_mgxs_tallies(
         "energy_groups": list(config.energy_group_edges_ev),
         "legendre_order": int(config.legendre_order),
         "scattering_moment": scattering_moment_for_legendre_order(config.legendre_order),
+        "auxiliary_tallies": {
+            "chi_delayed_domains": len(chi_delayed_by_domain),
+            "integral_flux_domains": len(integral_flux_by_domain),
+            "master_flux": master_flux_tally.name,
+            "prompt_generation_time": prompt_generation_time_tally.name,
+        },
     }
 
 
@@ -494,6 +538,16 @@ def _beta_matrix(values: Any, energy_group_count: int) -> np.ndarray:
         if squeezed.shape[0] == energy_group_count:
             return squeezed.T
     raise ValueError(f"Unsupported beta shape {squeezed.shape} for {energy_group_count} energy groups")
+
+
+def _collapse_beta_by_delayed_group(beta_matrix: np.ndarray) -> np.ndarray:
+    if beta_matrix.ndim == 1:
+        return beta_matrix
+    if beta_matrix.ndim == 2:
+        # Match the historical openmcToFoam path, which writes one delayed
+        # fraction per precursor group rather than summing over all energy groups.
+        return beta_matrix[:, 0]
+    raise ValueError(f"Unsupported beta rank {beta_matrix.ndim} for delayed-group collapse")
 
 
 def _mgxs_rows(xs_type: str, mean: Any, std_dev: Any) -> list[dict[str, float | int | str]]:
@@ -567,6 +621,10 @@ def load_mgxs_results(
     library: mgxs.Library,
     beta_by_domain: dict[str, mgxs.Beta],
     decay_rate_by_domain: dict[str, mgxs.DecayRate],
+    chi_delayed_by_domain: dict[str, mgxs.ChiDelayed],
+    integral_flux_by_domain: dict[str, openmc.Tally],
+    master_flux_tally: openmc.Tally,
+    prompt_generation_time_tally: openmc.Tally,
     domains: dict[str, openmc.Cell],
     config: MGXSExportConfig,
     model_metadata: dict[str, Any] | None = None,
@@ -578,8 +636,22 @@ def load_mgxs_results(
         library.load_from_statepoint(statepoint)
         for beta in beta_by_domain.values():
             beta.load_from_statepoint(statepoint)
+        for chi_delayed in chi_delayed_by_domain.values():
+            chi_delayed.load_from_statepoint(statepoint)
         for decay_rate in decay_rate_by_domain.values():
             decay_rate.load_from_statepoint(statepoint)
+
+        master_flux_mean = np.asarray(
+            statepoint.get_tally(name=master_flux_tally.name).mean,
+            dtype=float,
+        ).reshape(-1)
+        prompt_generation_time_mean = np.asarray(
+            statepoint.get_tally(name=prompt_generation_time_tally.name).mean,
+            dtype=float,
+        ).reshape(-1)
+        prompt_generation_time_s = (
+            float(prompt_generation_time_mean[0]) if prompt_generation_time_mean.size else None
+        )
 
         all_group_constant_rows: list[dict[str, float | int | str]] = []
         all_delayed_rows: list[dict[str, float | int | str]] = []
@@ -615,8 +687,24 @@ def load_mgxs_results(
             decay_std = _vectorise_delayed_xs(
                 decay_rate_by_domain[label].get_xs(value="std_dev", delayed_groups="all")
             )
-            beta_total = float(np.sum(beta_mean))
-            beta_total_by_delayed_group = np.sum(beta_mean, axis=1)
+            chi_delayed_mean = np.asarray(
+                chi_delayed_by_domain[label].get_xs(value="mean"),
+                dtype=float,
+            ).reshape(-1)
+            chi_delayed_std = np.asarray(
+                chi_delayed_by_domain[label].get_xs(value="std_dev"),
+                dtype=float,
+            ).reshape(-1)
+            zone_flux_mean = np.asarray(
+                statepoint.get_tally(name=integral_flux_by_domain[label].name).mean,
+                dtype=float,
+            ).reshape(-1)
+            integral_flux = [
+                0.0 if denominator == 0.0 else float(numerator / denominator)
+                for numerator, denominator in zip(zone_flux_mean, master_flux_mean, strict=True)
+            ][::-1]
+            beta_total_by_delayed_group = _collapse_beta_by_delayed_group(beta_mean)
+            beta_total = float(np.sum(beta_total_by_delayed_group))
             beta_total_by_energy_group = np.sum(beta_mean, axis=0)
 
             delayed_rows = [
@@ -643,6 +731,13 @@ def load_mgxs_results(
                     "id": domain.id,
                 },
                 "group_constants": mgxs_data,
+                "genfoam_aux": {
+                    "chi_delayed": {
+                        "mean": chi_delayed_mean.tolist(),
+                        "std_dev": chi_delayed_std.tolist(),
+                    },
+                    "integral_flux": integral_flux,
+                },
                 "group_constant_rows": group_constant_rows,
                 "delayed_neutrons": {
                     "beta_total": beta_total,
@@ -670,6 +765,7 @@ def load_mgxs_results(
                 "keff": _uncertain_value(statepoint.keff),
                 "reactivity_pcm": float((statepoint.keff.n - 1.0) / statepoint.keff.n * 1.0e5),
                 "generation_time_s": None,
+                "prompt_generation_time_s": prompt_generation_time_s,
                 "k_generation_by_generation": _serialise_array(getattr(statepoint, "k_generation", [])),
             },
             "domains": domain_results,
@@ -740,7 +836,17 @@ def run_mgxs_export(
 
     export_paths = build_directories(model_path_or_dir, export_dir=export_dir)
     model, model_metadata = load_model_from_xml(export_paths["model_xml_path"], config)
-    library, beta_by_domain, decay_rate_by_domain, domains, tally_metadata = attach_mgxs_tallies(model, config)
+    (
+        library,
+        beta_by_domain,
+        decay_rate_by_domain,
+        chi_delayed_by_domain,
+        integral_flux_by_domain,
+        master_flux_tally,
+        prompt_generation_time_tally,
+        domains,
+        tally_metadata,
+    ) = attach_mgxs_tallies(model, config)
     model_metadata["mgxs_tallies"] = tally_metadata
 
     statepoint_path = model.run(
@@ -755,6 +861,10 @@ def run_mgxs_export(
         library=library,
         beta_by_domain=beta_by_domain,
         decay_rate_by_domain=decay_rate_by_domain,
+        chi_delayed_by_domain=chi_delayed_by_domain,
+        integral_flux_by_domain=integral_flux_by_domain,
+        master_flux_tally=master_flux_tally,
+        prompt_generation_time_tally=prompt_generation_time_tally,
         domains=domains,
         config=config,
         model_metadata=model_metadata,
@@ -792,7 +902,17 @@ def run_openmc_mg_validation(
         raise FileNotFoundError(f"Could not find statepoint file at {statepoint_path}")
 
     model, model_metadata = load_model_from_xml(model_path_or_dir, config)
-    library, beta_by_domain, decay_rate_by_domain, domains, tally_metadata = attach_mgxs_tallies(model, config)
+    (
+        library,
+        beta_by_domain,
+        decay_rate_by_domain,
+        chi_delayed_by_domain,
+        integral_flux_by_domain,
+        master_flux_tally,
+        prompt_generation_time_tally,
+        domains,
+        tally_metadata,
+    ) = attach_mgxs_tallies(model, config)
 
     validation_dir = Path(output_dir).resolve() if output_dir is not None else statepoint_path.parent / "mg_mode_validation"
     validation_dir.mkdir(parents=True, exist_ok=True)

@@ -9,10 +9,10 @@ from typing import Any
 
 import numpy as np
 
-from openmc_to_genfoam_xs import DEFAULT_OUTPUT_SUBDIR, generate_openmc_to_foam_xs
+from openmc_to_genfoam_xs import DEFAULT_OUTPUT_SUBDIR, generate_genfoam_xs
 from prepare_concentric_case import DEFAULT_MGXS_EXPORT_DIR, DEFAULT_OUTPUT_DIR
 
-DEFAULT_REFERENCE_OUTPUT_DIR = DEFAULT_OUTPUT_DIR / "openmc_to_foam_reference"
+DEFAULT_REFERENCE_OUTPUT_DIR = DEFAULT_OUTPUT_DIR / "mgxs_to_genfoam_reference"
 
 def _compare_vectors(reference: list[float], current: list[float]) -> dict[str, Any]:
     if len(reference) != len(current):
@@ -39,28 +39,28 @@ def _compare_vectors(reference: list[float], current: list[float]) -> dict[str, 
 def run_comparison(
     mgxs_export_dir: Path,
     output_dir: Path,
+    rerun_mgxs: bool,
     particles: int | None,
     batches: int | None,
     inactive: int | None,
+    legendre_order: int | None,
     threads: int | None,
 ) -> dict[str, Any]:
     xs_output_dir = output_dir / DEFAULT_OUTPUT_SUBDIR
-    xs_payload = generate_openmc_to_foam_xs(
+    xs_payload = generate_genfoam_xs(
         mgxs_export_dir=mgxs_export_dir,
         output_dir=xs_output_dir,
+        rerun_mgxs=rerun_mgxs,
         particles=particles,
         batches=batches,
         inactive=inactive,
+        legendre_order=legendre_order,
         threads=threads,
     )
 
     comparison: dict[str, Any] = {
         "zones": {},
-        "notes": [
-            "Reference vectors are the raw openmcToFoam MultiGroupXS outputs.",
-            "Current vectors are the sanitized GeN-Foam adapter outputs.",
-            "Non-zero deltas should be interpreted as adapter interventions, not disagreements with the XS source of truth.",
-        ],
+        "notes": list(xs_payload.get("notes", [])),
     }
     for zone_name, zone_reference in xs_payload["raw_zones"].items():
         zone_current = xs_payload["zones"][zone_name]
@@ -87,13 +87,15 @@ def run_comparison(
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Run the openmcToFoam XS source workflow and compare the raw MultiGroupXS outputs with the sanitized GeN-Foam adapter outputs."
+        description="Compare raw MGXS-export-derived zone vectors with the sanitized GeN-Foam writer outputs."
     )
     parser.add_argument("--mgxs-export-dir", type=Path, default=DEFAULT_MGXS_EXPORT_DIR)
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_REFERENCE_OUTPUT_DIR)
+    parser.add_argument("--rerun-mgxs", action="store_true")
     parser.add_argument("--particles", type=int, default=None)
     parser.add_argument("--batches", type=int, default=None)
     parser.add_argument("--inactive", type=int, default=None)
+    parser.add_argument("--legendre-order", type=int, default=None)
     parser.add_argument("--threads", type=int, default=max(1, os.cpu_count() or 1))
     return parser.parse_args()
 
@@ -103,9 +105,11 @@ def main() -> None:
     summary = run_comparison(
         mgxs_export_dir=args.mgxs_export_dir.resolve(),
         output_dir=args.output_dir.resolve(),
+        rerun_mgxs=args.rerun_mgxs,
         particles=args.particles,
         batches=args.batches,
         inactive=args.inactive,
+        legendre_order=args.legendre_order,
         threads=args.threads,
     )
     print(json.dumps(summary, indent=2))

@@ -14,9 +14,10 @@ The current implementation uses the structure of the GeN-Foam `2D_externalSource
 - uses a manual geometry source derived from the OpenMC reference model dimensions and region names
 - uses the Gmsh Python API to build an axisymmetric wedge mesh as the active neutronics mesh
 - represents the centerline as a very small inner cylindrical symmetry patch to avoid collapsed-axis import defects in `gmshToFoam`
-- uses `openmcToFoam` / `MultiGroupXS` as the neutronics cross-section source of truth
-- adapts the `openmcToFoam` outputs into the current GeN-Foam `states(reference { zones (...) })` format
+- treats `openmc/build/concentric/mgxs_export/.../outputs/mgxs_constants.json` as the primary neutronics source of truth
+- uses a local writer to adapt MGXS export data into the current GeN-Foam `states(reference { zones (...) })` format
 - preserves only the local sanitization still needed for inactive-group diffusion, zero-removal, and non-finite field cleanup
+- supports an optional MGXS rerun path through `openmc/mgxs_export.py`, including a user-defined Legendre scattering order
 - updates only the generated case artifacts while leaving the stable OpenFOAM dictionaries and run scripts checked in as static files
 
 `openmc/build/concentric/reactor_run/model.xml` is still required as a reference artifact in the upstream export, but the current `genfoam` workflow does not parse it automatically.
@@ -36,9 +37,11 @@ Optional arguments:
 python genfoam/prepare_concentric_case.py \
   --mgxs-export-dir openmc/build/concentric/mgxs_export \
   --output-dir genfoam/constant/generated \
+  --rerun-mgxs \
   --openmc-particles 2000 \
   --openmc-batches 12 \
-  --openmc-inactive 4
+  --openmc-inactive 4 \
+  --legendre-order 0
 ```
 
 ## Generated Files
@@ -48,11 +51,12 @@ The script writes the following metadata files under `genfoam/constant/generated
 - `concentric_case_manifest.json` — combined source, geometry, mesh, and material payload
 - `concentric_reactor_wedge.msh` — axisymmetric Gmsh wedge mesh for the concentric reactor
 - `concentric_reactor_mesh_manifest.json` — expected physical groups, zone names, geometry, and mesh sizing used for the Gmsh mesh
-- `concentric_mesh_regions.csv` — canonical region-to-cellZone mapping shared by the mesh and `openmcToFoam`-derived nuclear data
+- `concentric_mesh_regions.csv` — canonical region-to-cellZone mapping shared by the mesh and MGXS-derived nuclear data
 - `concentric_materials.json` — per-domain multigroup constants and delayed-neutron data in converted units
-- `openmc_to_foam_xs/summary.json` — source-run metadata and artifact paths for the active `openmcToFoam` XS workflow
-- `openmc_to_foam_xs/nuclearData.openmcToFoam` — raw legacy `openmcToFoam` output retained for inspection
-- `openmc_to_foam_xs/nuclearData.genfoam` — adapted GeN-Foam `states/reference` nuclear data generated from the `openmcToFoam` source
+- `mgxs_to_genfoam_xs/summary.json` — source-run metadata and artifact paths for the active MGXS-to-GeN-Foam XS workflow
+- `mgxs_to_genfoam_xs/raw_vectors.json` — zone-wise vectors extracted directly from the MGXS export
+- `mgxs_to_genfoam_xs/adapted_vectors.json` — zone-wise vectors after GeN-Foam compatibility sanitization
+- `mgxs_to_genfoam_xs/nuclearData.genfoam` — adapted GeN-Foam `states/reference` nuclear data generated from the MGXS source
 
 It also updates the generated GeN-Foam case files in place:
 
@@ -125,23 +129,34 @@ Current `checkMesh` status for the imported wedge mesh:
 - wedge patches are rewritten to OpenFOAM `wedge` patch types after `gmshToFoam`
 - the centerline patch is rewritten to `symmetryPlane`
 
-## openmcToFoam XS Path
+## MGXS XS Path
 
-`openmcToFoam` is now the default cross-section source. The local Python code is only an adapter and sanitization layer for current GeN-Foam input compatibility.
+The default XS path reads an existing MGXS export and writes the GeN-Foam `nuclearData` file locally. No OpenMC rerun happens unless you request it.
 
-The helper below reruns the same `openmcToFoam` source path and compares the raw `MultiGroupXS` outputs against the sanitized adapter outputs:
+The helper below compares the raw MGXS-export-derived vectors against the sanitized writer outputs:
 
 ```bash
 conda run -n openmc python genfoam/openmc_to_foam_reference.py
 ```
 
-`MultiGroupXS` must be installed in the active `openmc` environment. The local scripts now import it directly and fail immediately if that dependency is missing.
+To force a fresh MGXS rerun through `openmc/mgxs_export.py`, pass `--rerun-mgxs`. You can also select the scattering order explicitly:
 
-Outputs are written under `genfoam/constant/generated/openmc_to_foam_reference/`.
+```bash
+conda run -n openmc python genfoam/prepare_concentric_case.py \
+  --rerun-mgxs \
+  --openmc-particles 2000 \
+  --openmc-batches 12 \
+  --openmc-inactive 4 \
+  --legendre-order 0
+```
+
+`MultiGroupXS` must be installed in the active `openmc` environment. The local scripts import it through `openmc/mgxs_export.py`, and they fail immediately if that dependency is missing.
+
+Outputs are written under `genfoam/constant/generated/mgxs_to_genfoam_reference/`.
 
 ## Next Steps
 - Compare wedge `k_eff` and flux smoothness against the experimental full-3D path.
-- Tighten the remaining adapter sanitization only where the raw `openmcToFoam` output still produces non-finite or solver-breaking values.
+- Tighten the remaining adapter sanitization only where the raw MGXS export still produces non-finite or solver-breaking values.
 - Make the generator target a selected group sweep so you can switch between 2, 8, 16, 25, and 40-group cases without editing files by hand.
 
 ## Visualization with ParaView
