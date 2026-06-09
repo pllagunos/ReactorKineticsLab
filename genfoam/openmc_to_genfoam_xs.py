@@ -22,6 +22,11 @@ DEFAULT_OUTPUT_SUBDIR = "mgxs_to_genfoam_xs"
 DEFAULT_INACTIVE_FALLBACK = 1.0e-6
 DEFAULT_MAX_DIFFUSION_M = 1.0e4
 DEFAULT_PROMPT_GENERATION_TIME_S = 1.0
+SCATTER_MATRIX_PRIORITY = (
+    "consistent nu-scatter matrix",
+    "nu-scatter matrix",
+    "scatter matrix",
+)
 
 
 def _write_json(path: Path, payload: dict[str, Any]) -> None:
@@ -99,6 +104,66 @@ def _collapse_legendre_moment(values: Any) -> Any:
     return values
 
 
+def select_scatter_matrix_payload(group_constants: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+    for xs_type in SCATTER_MATRIX_PRIORITY:
+        payload = group_constants.get(xs_type)
+        if payload is not None:
+            return xs_type, payload
+    available = ", ".join(sorted(group_constants))
+    raise KeyError(
+        "Could not find any supported scatter-matrix payload. "
+        f"Expected one of {SCATTER_MATRIX_PRIORITY}, available: {available}"
+    )
+
+
+def normalize_mgxs_types_for_genfoam(mgxs_types: tuple[str, ...] | list[str]) -> tuple[str, ...]:
+    normalized = list(mgxs_types)
+    if "chi-prompt" not in normalized:
+        insert_at = normalized.index("chi") + 1 if "chi" in normalized else len(normalized)
+        normalized.insert(insert_at, "chi-prompt")
+    if "consistent nu-scatter matrix" not in normalized:
+        insert_at = (
+            normalized.index("nu-scatter matrix") + 1
+            if "nu-scatter matrix" in normalized
+            else len(normalized)
+        )
+        normalized.insert(insert_at, "consistent nu-scatter matrix")
+    return tuple(normalized)
+
+
+def validate_genfoam_scattering_contract(export: dict[str, Any]) -> None:
+    config = export.get("config", {})
+    if "scatter_correction" not in config or config["scatter_correction"] is not None:
+        raise ValueError(
+            "The MGXS export does not explicitly disable OpenMC's P0 scatter correction. "
+            "Re-run prepare_concentric_case.py with --rerun-mgxs to generate GeN-Foam-compatible scattering data."
+        )
+    if config.get("scatter_formulation") != "consistent":
+        raise ValueError(
+            "The MGXS export does not declare the consistent scattering formulation. "
+            "Re-run prepare_concentric_case.py with --rerun-mgxs."
+        )
+    if config.get("kinetics_group_count") != 1:
+        raise ValueError(
+            "The MGXS export does not use one-group Beta and decay-rate kinetics data. "
+            "Re-run prepare_concentric_case.py with --rerun-mgxs."
+        )
+
+    missing_domains = [
+        zone_name
+        for zone_name, domain_payload in export.get("domains", {}).items()
+        if (
+            "consistent nu-scatter matrix" not in domain_payload.get("group_constants", {})
+            or "chi-prompt" not in domain_payload.get("group_constants", {})
+        )
+    ]
+    if missing_domains:
+        raise ValueError(
+            "The MGXS export is missing GeN-Foam prompt/scattering data for: "
+            f"{', '.join(missing_domains)}. Re-run prepare_concentric_case.py with --rerun-mgxs."
+        )
+
+
 def _resolve_prompt_generation_time(run_payload: dict[str, Any]) -> tuple[float, str]:
     prompt = run_payload.get("prompt_generation_time_s")
     if isinstance(prompt, (int, float)) and float(prompt) > 0.0:
@@ -147,6 +212,7 @@ def _extract_source_export(
     model_xml_path = mgxs_export_dir / "reactor_run" / "model.xml"
 
     if not rerun_mgxs:
+        validate_genfoam_scattering_contract(export)
         return export, {
             "mode": "existing_export",
             "mgxs_json_path": str(mgxs_json_path.resolve()),
@@ -155,19 +221,23 @@ def _extract_source_export(
 
     config_payload = export["config"]
     configured_run = export.get("model", {}).get("configured_run", {})
+    normalized_mgxs_types = normalize_mgxs_types_for_genfoam(tuple(str(item) for item in config_payload["mgxs_types"]))
     config = MGXSExportConfig(
         particles=particles if particles is not None else int(configured_run.get("particles", 16000)),
         batches=batches if batches is not None else int(configured_run.get("batches", 20)),
         inactive=inactive if inactive is not None else int(configured_run.get("inactive", 5)),
         domain_definitions=tuple(tuple(item) for item in config_payload["domain_definitions"]),
         energy_group_edges_ev=tuple(float(edge) for edge in config_payload["energy_group_edges_ev"]),
-        mgxs_types=tuple(str(item) for item in config_payload["mgxs_types"]),
+        mgxs_types=normalized_mgxs_types,
         delayed_groups=tuple(int(item) for item in config_payload["delayed_groups"]),
         legendre_order=(
             int(legendre_order)
             if legendre_order is not None
             else int(configured_run.get("legendre_order", config_payload["legendre_order"]))
         ),
+        scatter_correction=None,
+        scatter_formulation="consistent",
+        kinetics_group_count=1,
     )
     rerun_export_dir = output_dir / "mgxs_rerun_export"
     rerun_results = run_mgxs_export(
@@ -176,6 +246,7 @@ def _extract_source_export(
         export_dir=rerun_export_dir,
         threads=threads,
     )
+    validate_genfoam_scattering_contract(rerun_results)
     return rerun_results, {
         "mode": "rerun_export",
         "mgxs_json_path": str((rerun_export_dir / "outputs" / "mgxs_constants.json").resolve()),
@@ -189,26 +260,27 @@ def _raw_zone_data_from_export(zone_name: str, export: dict[str, Any]) -> dict[s
     group_constants = domain_payload["group_constants"]
     delayed = domain_payload.get("delayed_neutrons", {})
     genfoam_aux = domain_payload.get("genfoam_aux", {})
+    scatter_matrix_source, scatter_matrix_payload = select_scatter_matrix_payload(group_constants)
 
     total_xs = [float(value) * 100.0 for value in group_constants["total"]["mean"]]
     diffusion = [float(value) * CM_TO_M for value in group_constants["diffusion-coefficient"]["mean"]]
     inverse_velocity = [float(value) / CM_TO_M for value in group_constants["inverse-velocity"]["mean"]]
     nu_sigma_eff = [float(value) / CM_TO_M for value in group_constants["nu-fission"]["mean"]]
     sigma_pow = [float(value) * EV_TO_J / CM_TO_M for value in group_constants["kappa-fission"]["mean"]]
-    chi_prompt = [float(value) for value in group_constants["chi"]["mean"]]
+    chi_prompt = [float(value) for value in group_constants["chi-prompt"]["mean"]]
 
     scattering_p0 = [
         [float(value) * 100.0 for value in row]
-        for row in _collapse_legendre_moment(group_constants["scatter matrix"]["mean"])
+        for row in _collapse_legendre_moment(scatter_matrix_payload["mean"])
     ]
     sigma_removal = [
         total - scattering_p0[group_index][group_index]
         for group_index, total in enumerate(total_xs)
     ]
 
-    beta_by_delayed_group = _collapse_beta_by_delayed_group(delayed.get("beta_by_delayed_group", []))
+    beta_by_delayed_group = _collapse_beta_by_delayed_group(delayed.get("beta_total_by_delayed_group", []))
     if not beta_by_delayed_group:
-        beta_by_delayed_group = _collapse_beta_by_delayed_group(delayed.get("beta_total_by_delayed_group", []))
+        beta_by_delayed_group = _collapse_beta_by_delayed_group(delayed.get("beta_by_delayed_group", []))
     lambda_values = [float(value) for value in delayed.get("decay_rate_per_s_by_delayed_group", [])]
 
     synthesized_fields: list[str] = []
@@ -247,6 +319,7 @@ def _raw_zone_data_from_export(zone_name: str, export: dict[str, Any]) -> dict[s
         "metadata": {
             "synthesized_fields": synthesized_fields,
             "source_domain_id": domain_payload["domain"]["id"],
+            "scatter_matrix_source": scatter_matrix_source,
         },
     }
 
@@ -331,6 +404,14 @@ def _sanitize_lambda(values: list[float]) -> list[float]:
     return sanitized
 
 
+def _changed_indices(reference: list[float], current: list[float], tolerance: float = 1.0e-14) -> list[int]:
+    return [
+        index + 1
+        for index, (raw_value, adapted_value) in enumerate(zip(reference, current, strict=True))
+        if abs(float(raw_value) - float(adapted_value)) > tolerance
+    ]
+
+
 def _adapt_zone_data(zone_name: str, raw_zone_data: dict[str, Any]) -> dict[str, Any]:
     adapted = dict(raw_zone_data)
     adapted["IV"] = _sanitize_positive_vector(zone_name, "IV", raw_zone_data["IV"], raw_zone_data)
@@ -341,6 +422,16 @@ def _adapt_zone_data(zone_name: str, raw_zone_data: dict[str, Any]) -> dict[str,
         float(value) if math.isfinite(value) and value >= 0.0 else 0.0
         for value in raw_zone_data["integralFlux"]
     ]
+    adapted["metadata"] = {
+        **raw_zone_data.get("metadata", {}),
+        "sanitization": {
+            "IV_groups": _changed_indices(raw_zone_data["IV"], adapted["IV"]),
+            "D_groups": _changed_indices(raw_zone_data["D"], adapted["D"]),
+            "sigmaRemoval_groups": _changed_indices(raw_zone_data["sigmaRemoval"], adapted["sigmaRemoval"]),
+            "lambda_groups": _changed_indices(raw_zone_data["lambda"], adapted["lambda"]),
+            "integralFlux_groups": _changed_indices(raw_zone_data["integralFlux"], adapted["integralFlux"]),
+        },
+    }
     return adapted
 
 
@@ -446,6 +537,19 @@ def generate_genfoam_xs(
         zone_name: _adapt_zone_data(zone_name, raw_zone_data)
         for zone_name, raw_zone_data in raw_zones.items()
     }
+    sanitization_summary = {
+        zone_name: {
+            field_name: indices
+            for field_name, indices in zone_data.get("metadata", {}).get("sanitization", {}).items()
+            if indices
+        }
+        for zone_name, zone_data in adapted_zones.items()
+    }
+    sanitization_summary = {
+        zone_name: field_changes
+        for zone_name, field_changes in sanitization_summary.items()
+        if field_changes
+    }
 
     payload = {
         "source": {
@@ -459,6 +563,13 @@ def generate_genfoam_xs(
             "delayed_groups": export["config"]["delayed_groups"],
             "domain_order": domain_order,
             "legendre_order": int(export["config"]["legendre_order"]),
+            "scatter_correction": export["config"]["scatter_correction"],
+            "scatter_formulation": export["config"]["scatter_formulation"],
+            "kinetics_group_count": int(export["config"]["kinetics_group_count"]),
+            "scatter_matrix_sources": {
+                zone_name: raw_zones[zone_name]["metadata"]["scatter_matrix_source"]
+                for zone_name in domain_order
+            },
         },
         "reference_run": {
             "keff": export.get("run", {}).get("keff"),
@@ -474,6 +585,7 @@ def generate_genfoam_xs(
             "Current vectors are the sanitized GeN-Foam writer outputs.",
             "Non-zero deltas should be interpreted as writer interventions or legacy-export fallbacks.",
         ],
+        "sanitization_summary": sanitization_summary,
     }
 
     adapted_nuclear_data_text = build_nuclear_data_text_from_export(payload, domain_order)
@@ -489,6 +601,7 @@ def generate_genfoam_xs(
         "source": payload["source"],
         "config": payload["config"],
         "reference_run": payload["reference_run"],
+        "sanitization_summary": sanitization_summary,
         "files": {
             "raw_vectors": str(raw_vectors_path),
             "adapted_vectors": str(adapted_vectors_path),

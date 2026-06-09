@@ -24,8 +24,10 @@ DEFAULT_MGXS_TYPES = (
     "nu-fission",
     "kappa-fission",
     "chi",
+    "chi-prompt",
     "scatter matrix",
     "nu-scatter matrix",
+    "consistent nu-scatter matrix",
     "inverse-velocity",
 )
 
@@ -64,6 +66,9 @@ class MGXSExportConfig:
     mgxs_types: tuple[str, ...] = DEFAULT_MGXS_TYPES
     delayed_groups: tuple[int, ...] = DEFAULT_DELAYED_GROUPS
     legendre_order: int = 0
+    scatter_correction: str | None = None
+    scatter_formulation: str = "consistent"
+    kinetics_group_count: int = 1
 
 
 def legendre_order_for_moment(moment: str | int) -> int:
@@ -341,6 +346,9 @@ def load_model_from_xml(
         "energy_group_edges_ev": list(config.energy_group_edges_ev),
         "mgxs_types": list(config.mgxs_types),
         "delayed_groups": list(config.delayed_groups),
+        "scatter_correction": config.scatter_correction,
+        "scatter_formulation": config.scatter_formulation,
+        "kinetics_group_count": config.kinetics_group_count,
     }
     metadata["tally_cleanup"] = tally_cleanup
     return model, metadata
@@ -379,6 +387,12 @@ def attach_mgxs_tallies(
         for label, cell_name in domain_mapping.items()
     }
     energy_groups = mgxs.EnergyGroups(np.asarray(config.energy_group_edges_ev, dtype=float))
+    if config.kinetics_group_count != 1:
+        raise ValueError("Only one-group Beta and decay-rate kinetics data are supported")
+    kinetics_energy_groups = mgxs.EnergyGroups(
+        np.asarray([config.energy_group_edges_ev[0], config.energy_group_edges_ev[-1]], dtype=float)
+    )
+    root_universe = geometry.root_universe
 
     library = mgxs.Library(
         geometry=geometry,
@@ -392,6 +406,13 @@ def attach_mgxs_tallies(
     library.legendre_order = legendre_order_for_moment(config.legendre_order)
     library.build_library()
 
+    for domain in library.domains:
+        for xs_type in config.mgxs_types:
+            if "scatter matrix" not in xs_type:
+                continue
+            scatter_xs = library.get_mgxs(domain, xs_type)
+            scatter_xs.correction = config.scatter_correction
+
     tallies = openmc.Tallies()
     if hasattr(library, "add_to_tallies"):
         library.add_to_tallies(tallies, merge=True)
@@ -402,7 +423,7 @@ def attach_mgxs_tallies(
         label: mgxs.Beta(
             domain=domain,
             domain_type="cell",
-            energy_groups=energy_groups,
+            energy_groups=kinetics_energy_groups,
             delayed_groups=list(config.delayed_groups),
             name=f"{label}-beta",
         )
@@ -421,12 +442,19 @@ def attach_mgxs_tallies(
         label: mgxs.DecayRate(
             domain=domain,
             domain_type="cell",
-            energy_groups=energy_groups,
+            energy_groups=kinetics_energy_groups,
             delayed_groups=list(config.delayed_groups),
             name=f"{label}-decay-rate",
         )
         for label, domain in domains.items()
     }
+    decay_rate_by_domain["__master__"] = mgxs.DecayRate(
+        domain=root_universe,
+        domain_type="universe",
+        energy_groups=kinetics_energy_groups,
+        delayed_groups=list(config.delayed_groups),
+        name="master-decay-rate",
+    )
     for kinetics_xs in [*beta_by_domain.values(), *chi_delayed_by_domain.values(), *decay_rate_by_domain.values()]:
         for tally in kinetics_xs.tallies.values():
             tallies.append(tally, merge=True)
@@ -442,7 +470,6 @@ def attach_mgxs_tallies(
         tallies.append(tally, merge=False)
         integral_flux_by_domain[label] = tally
 
-    root_universe = geometry.root_universe
     master_flux_tally = openmc.Tally(name="master-integral-flux")
     master_flux_tally.filters = [energy_filter, openmc.UniverseFilter(root_universe)]
     master_flux_tally.scores = ["flux"]
@@ -652,6 +679,12 @@ def load_mgxs_results(
         prompt_generation_time_s = (
             float(prompt_generation_time_mean[0]) if prompt_generation_time_mean.size else None
         )
+        master_decay_mean = _vectorise_delayed_xs(
+            decay_rate_by_domain["__master__"].get_xs(value="mean", delayed_groups="all")
+        )
+        master_decay_std = _vectorise_delayed_xs(
+            decay_rate_by_domain["__master__"].get_xs(value="std_dev", delayed_groups="all")
+        )
 
         all_group_constant_rows: list[dict[str, float | int | str]] = []
         all_delayed_rows: list[dict[str, float | int | str]] = []
@@ -684,9 +717,14 @@ def load_mgxs_results(
             decay_mean = _vectorise_delayed_xs(
                 decay_rate_by_domain[label].get_xs(value="mean", delayed_groups="all")
             )
+            use_master_decay = not np.any(decay_mean > 0.0)
+            if use_master_decay:
+                decay_mean = master_decay_mean.copy()
             decay_std = _vectorise_delayed_xs(
                 decay_rate_by_domain[label].get_xs(value="std_dev", delayed_groups="all")
             )
+            if use_master_decay:
+                decay_std = master_decay_std.copy()
             chi_delayed_mean = np.asarray(
                 chi_delayed_by_domain[label].get_xs(value="mean"),
                 dtype=float,
@@ -720,7 +758,7 @@ def load_mgxs_results(
                 for delayed_group_index, (delayed_group, decay_group_mean, decay_group_std) in enumerate(
                     zip(config.delayed_groups, decay_mean, decay_std, strict=True)
                 )
-                for energy_group_index in range(energy_group_count)
+                for energy_group_index in range(beta_mean.shape[1])
             ]
             all_delayed_rows.extend(delayed_rows)
 
@@ -741,10 +779,8 @@ def load_mgxs_results(
                 "group_constant_rows": group_constant_rows,
                 "delayed_neutrons": {
                     "beta_total": beta_total,
-                    "beta_by_delayed_group": _serialise_array(beta_mean[:, 0] if energy_group_count == 1 else beta_mean),
-                    "beta_std_dev_by_delayed_group": _serialise_array(
-                        beta_std[:, 0] if energy_group_count == 1 else beta_std
-                    ),
+                    "beta_by_delayed_group": _serialise_array(beta_mean[:, 0]),
+                    "beta_std_dev_by_delayed_group": _serialise_array(beta_std[:, 0]),
                     "beta_total_by_delayed_group": beta_total_by_delayed_group.tolist(),
                     "beta_total_by_energy_group": beta_total_by_energy_group.tolist(),
                     "decay_rate_per_s_by_delayed_group": decay_mean.tolist(),

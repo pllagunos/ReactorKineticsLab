@@ -111,6 +111,16 @@ class MeshSizingDefinition:
     core_size_m: float = 0.5
     fuel_size_m: float = 0.2
     rod_size_m: float = 0.2
+    reflector_radial_divisions: int = 2
+    moderator_radial_divisions: int = 2
+    core_radial_divisions: int = 2
+    fuel_radial_divisions: int = 3
+    rod_radial_divisions: int = 2
+    reflector_axial_divisions: int = 1
+    moderator_axial_divisions: int = 1
+    core_axial_divisions: int = 2
+    fuel_axial_divisions: int = 12
+    rod_axial_divisions: int = 2
     axis_epsilon_m: float = 1.0e-4
     wedge_angle_deg: float = 1.0
     experimental_theta_divisions: int = 32
@@ -202,6 +212,34 @@ def _region_target_size(region_name: str, sizing: MeshSizingDefinition) -> float
     raise ValueError(f"Unsupported region name: {region_name}")
 
 
+def _region_radial_divisions(region_name: str, sizing: MeshSizingDefinition) -> int:
+    if region_name.startswith("core_fuel_ring_"):
+        return sizing.fuel_radial_divisions
+    if region_name == "core_control_rod":
+        return sizing.rod_radial_divisions
+    if region_name in {"core_central_moderator_channel", "core_heavy_water_coolant_and_moderator"}:
+        return sizing.core_radial_divisions
+    if region_name == "moderator":
+        return sizing.moderator_radial_divisions
+    if region_name == "reflector":
+        return sizing.reflector_radial_divisions
+    raise ValueError(f"Unsupported region name: {region_name}")
+
+
+def _region_axial_divisions(region_name: str, sizing: MeshSizingDefinition) -> int:
+    if region_name.startswith("core_fuel_ring_"):
+        return sizing.fuel_axial_divisions
+    if region_name == "core_control_rod":
+        return sizing.rod_axial_divisions
+    if region_name in {"core_central_moderator_channel", "core_heavy_water_coolant_and_moderator"}:
+        return sizing.core_axial_divisions
+    if region_name == "moderator":
+        return sizing.moderator_axial_divisions
+    if region_name == "reflector":
+        return sizing.reflector_axial_divisions
+    raise ValueError(f"Unsupported region name: {region_name}")
+
+
 def _material_radial_edges(geometry: ReactorGeometryDefinition) -> list[float]:
     return sorted({
         0.0,
@@ -244,21 +282,20 @@ def _classify_region(geometry: ReactorGeometryDefinition, radius_m: float, z_m: 
     return None
 
 
-def _subdivide_interval(start_m: float, end_m: float, target_size_m: float) -> list[float]:
-    if target_size_m <= 0.0:
-        raise ValueError(f"Target mesh size must be positive, got {target_size_m}")
+def _subdivide_interval(start_m: float, end_m: float, divisions: int) -> list[float]:
+    if divisions <= 0:
+        raise ValueError(f"Interval subdivisions must be positive, got {divisions}")
     length_m = end_m - start_m
     if length_m <= 0.0:
         raise ValueError(f"Mesh interval must be positive, got [{start_m}, {end_m}]")
-    cell_count = max(1, math.ceil(length_m / target_size_m))
-    step_m = length_m / cell_count
-    return [start_m + step_m * index for index in range(cell_count)] + [end_m]
+    step_m = length_m / divisions
+    return [start_m + step_m * index for index in range(divisions)] + [end_m]
 
 
-def _merge_subdivided_edges(material_edges: list[float], interval_targets: dict[int, float]) -> tuple[float, ...]:
+def _merge_subdivided_edges(material_edges: list[float], interval_divisions: dict[int, int]) -> tuple[float, ...]:
     merged: list[float] = []
     for interval_index, (start_m, end_m) in enumerate(zip(material_edges[:-1], material_edges[1:], strict=True)):
-        interval_edges = _subdivide_interval(start_m, end_m, interval_targets[interval_index])
+        interval_edges = _subdivide_interval(start_m, end_m, interval_divisions[interval_index])
         if not merged:
             merged.extend(interval_edges)
         else:
@@ -288,25 +325,25 @@ def build_structured_grid(
     if not coarse_cells:
         raise ValueError("No occupied reactor cells were classified from the manual geometry definition")
 
-    radial_targets = {
-        radial_index: min(
-            _region_target_size(region_name, selected_sizing)
+    radial_divisions = {
+        radial_index: max(
+            _region_radial_divisions(region_name, selected_sizing)
             for (candidate_index, _), region_name in coarse_cells.items()
             if candidate_index == radial_index
         )
         for radial_index in range(len(material_radial_edges) - 1)
     }
-    axial_targets = {
-        axial_index: min(
-            _region_target_size(region_name, selected_sizing)
+    axial_divisions = {
+        axial_index: max(
+            _region_axial_divisions(region_name, selected_sizing)
             for (_, candidate_index), region_name in coarse_cells.items()
             if candidate_index == axial_index
         )
         for axial_index in range(len(material_axial_edges) - 1)
     }
 
-    radial_edges_m = _merge_subdivided_edges(material_radial_edges, radial_targets)
-    axial_edges_m = _merge_subdivided_edges(material_axial_edges, axial_targets)
+    radial_edges_m = _merge_subdivided_edges(material_radial_edges, radial_divisions)
+    axial_edges_m = _merge_subdivided_edges(material_axial_edges, axial_divisions)
 
     occupied_cells: dict[tuple[int, int], str] = {}
     blocks: list[StructuredBlock] = []
@@ -402,23 +439,6 @@ def _build_planar_surfaces(
     axial_edges = grid.axial_edges_m
     occupied_cells = grid.occupied_cells
 
-    radial_targets = {
-        radial_index: min(
-            _region_target_size(region_name, sizing)
-            for (candidate_index, _), region_name in occupied_cells.items()
-            if candidate_index == radial_index
-        )
-        for radial_index in range(len(radial_edges) - 1)
-    }
-    axial_targets = {
-        axial_index: min(
-            _region_target_size(region_name, sizing)
-            for (_, candidate_index), region_name in occupied_cells.items()
-            if candidate_index == axial_index
-        )
-        for axial_index in range(len(axial_edges) - 1)
-    }
-
     geo = gmsh.model.geo
     point_tags: dict[tuple[int, int], int] = {}
     for radial_index, radius_m in enumerate(radial_edges):
@@ -452,12 +472,10 @@ def _build_planar_surfaces(
 
     geo.synchronize()
 
-    for (radial_index, _), line_tag in horizontal_lines.items():
-        node_count = _interval_node_count(radial_edges[radial_index + 1] - radial_edges[radial_index], radial_targets[radial_index])
-        gmsh.model.mesh.setTransfiniteCurve(line_tag, node_count)
-    for (_, axial_index), line_tag in vertical_lines.items():
-        node_count = _interval_node_count(axial_edges[axial_index + 1] - axial_edges[axial_index], axial_targets[axial_index])
-        gmsh.model.mesh.setTransfiniteCurve(line_tag, node_count)
+    for line_tag in horizontal_lines.values():
+        gmsh.model.mesh.setTransfiniteCurve(line_tag, 2)
+    for line_tag in vertical_lines.values():
+        gmsh.model.mesh.setTransfiniteCurve(line_tag, 2)
     for surface_tag, _, recombine_surface in surface_entities:
         if recombine_surface:
             gmsh.model.mesh.setTransfiniteSurface(surface_tag)
@@ -847,6 +865,16 @@ def parse_args() -> argparse.Namespace:
     generate.add_argument("--core-size-m", type=float, default=MeshSizingDefinition.core_size_m)
     generate.add_argument("--fuel-size-m", type=float, default=MeshSizingDefinition.fuel_size_m)
     generate.add_argument("--rod-size-m", type=float, default=MeshSizingDefinition.rod_size_m)
+    generate.add_argument("--reflector-radial-divisions", type=int, default=MeshSizingDefinition.reflector_radial_divisions)
+    generate.add_argument("--moderator-radial-divisions", type=int, default=MeshSizingDefinition.moderator_radial_divisions)
+    generate.add_argument("--core-radial-divisions", type=int, default=MeshSizingDefinition.core_radial_divisions)
+    generate.add_argument("--fuel-radial-divisions", type=int, default=MeshSizingDefinition.fuel_radial_divisions)
+    generate.add_argument("--rod-radial-divisions", type=int, default=MeshSizingDefinition.rod_radial_divisions)
+    generate.add_argument("--reflector-axial-divisions", type=int, default=MeshSizingDefinition.reflector_axial_divisions)
+    generate.add_argument("--moderator-axial-divisions", type=int, default=MeshSizingDefinition.moderator_axial_divisions)
+    generate.add_argument("--core-axial-divisions", type=int, default=MeshSizingDefinition.core_axial_divisions)
+    generate.add_argument("--fuel-axial-divisions", type=int, default=MeshSizingDefinition.fuel_axial_divisions)
+    generate.add_argument("--rod-axial-divisions", type=int, default=MeshSizingDefinition.rod_axial_divisions)
     generate.add_argument("--wedge-angle-deg", type=float, default=MeshSizingDefinition.wedge_angle_deg)
     generate.add_argument("--experimental-theta-divisions", type=int, default=MeshSizingDefinition.experimental_theta_divisions)
     generate.add_argument("--optimize", action="store_true", help="Enable Gmsh mesh optimization after generation")
@@ -889,6 +917,16 @@ def main() -> None:
             core_size_m=args.core_size_m,
             fuel_size_m=args.fuel_size_m,
             rod_size_m=args.rod_size_m,
+            reflector_radial_divisions=args.reflector_radial_divisions,
+            moderator_radial_divisions=args.moderator_radial_divisions,
+            core_radial_divisions=args.core_radial_divisions,
+            fuel_radial_divisions=args.fuel_radial_divisions,
+            rod_radial_divisions=args.rod_radial_divisions,
+            reflector_axial_divisions=args.reflector_axial_divisions,
+            moderator_axial_divisions=args.moderator_axial_divisions,
+            core_axial_divisions=args.core_axial_divisions,
+            fuel_axial_divisions=args.fuel_axial_divisions,
+            rod_axial_divisions=args.rod_axial_divisions,
             wedge_angle_deg=args.wedge_angle_deg,
             experimental_theta_divisions=args.experimental_theta_divisions,
             optimize=args.optimize,

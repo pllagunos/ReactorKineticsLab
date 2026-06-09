@@ -1,145 +1,125 @@
-# Prerequisites
-- activate the `openmc` Conda environment before running the Python tooling
-- previously ran the `openmc/` workflow to get XML, statepoint, and MGXS files
-- have an installation of foamForNuclear and OpenFOAM available in the shell
-
 # GeN-Foam Concentric Reactor Case
 
-This directory now contains a generated GeN-Foam diffusion case based on the OpenMC concentric reactor model.
+This directory contains an axisymmetric GeN-Foam diffusion model of the
+concentric OpenMC reactor.
 
-## Current Scope
+## Prerequisites
 
-The current implementation uses the structure of the GeN-Foam `2D_externalSourceDiffusion` feature case, but replaces its neutronics data and mesh with OpenMC-derived inputs from the concentric reactor workflow. The generator now:
+- OpenFOAM and foamForNuclear available in the shell
+- the `openmc` Conda environment with OpenMC, Gmsh, and `MultiGroupXS`
+- an OpenMC model export under `openmc/build/concentric/mgxs_export/`
 
-- uses a manual geometry source derived from the OpenMC reference model dimensions and region names
-- uses the Gmsh Python API to build an axisymmetric wedge mesh as the active neutronics mesh
-- represents the centerline as a very small inner cylindrical symmetry patch to avoid collapsed-axis import defects in `gmshToFoam`
-- treats `openmc/build/concentric/mgxs_export/.../outputs/mgxs_constants.json` as the primary neutronics source of truth
-- uses a local writer to adapt MGXS export data into the current GeN-Foam `states(reference { zones (...) })` format
-- preserves only the local sanitization still needed for inactive-group diffusion, zero-removal, and non-finite field cleanup
-- supports an optional MGXS rerun path through `openmc/mgxs_export.py`, including a user-defined Legendre scattering order
-- updates only the generated case artifacts while leaving the stable OpenFOAM dictionaries and run scripts checked in as static files
+Run Python commands from the repository root with the `openmc` environment
+active, or use `conda run -n openmc` as shown below.
 
-`openmc/build/concentric/reactor_run/model.xml` is still required as a reference artifact in the upstream export, but the current `genfoam` workflow does not parse it automatically.
+## Workflow
 
-## Usage
+The workflow has three distinct stages:
 
-From `ReactorKineticsLab/`:
+1. `prepare_concentric_case.py` reads or regenerates MGXS data, writes
+   GeN-Foam `nuclearData` and initial flux files, and generates the Gmsh
+   `.msh` file and mesh manifest.
+2. `Allmesh` imports that prepared `.msh` file with `gmshToFoam`, configures
+   patches and cell zones, runs `checkMesh`, and validates the import. It does
+   not regenerate the Gmsh geometry.
+3. `Allrun` calls `Allmesh` and then runs GeN-Foam.
+
+For the first run, or after changing MGXS settings:
 
 ```bash
-conda activate openmc
-python genfoam/prepare_concentric_case.py
+conda run -n openmc python genfoam/prepare_concentric_case.py --rerun-mgxs
+cd genfoam
+./Allclean
+./Allrun
 ```
 
-Optional arguments:
+Without particle-count overrides, `--rerun-mgxs` reuses the run settings
+recorded in the source export. The current 16-group source records 20,000
+particles, 100 batches, and 10 inactive batches.
+
+Once a compatible MGXS export exists, preparation can reuse it without an
+OpenMC run:
 
 ```bash
-python genfoam/prepare_concentric_case.py \
-  --mgxs-export-dir openmc/build/concentric/mgxs_export \
-  --output-dir genfoam/constant/generated \
-  --rerun-mgxs \
-  --openmc-particles 2000 \
-  --openmc-batches 12 \
-  --openmc-inactive 4 \
-  --legendre-order 0
+conda run -n openmc python genfoam/prepare_concentric_case.py
 ```
 
-## Generated Files
+`Allclean` removes time directories, imported `polyMesh`, and logs. It keeps
+the prepared files under `constant/generated/`, so `Allrun` can re-import the
+same mesh without rerunning OpenMC or Gmsh.
 
-The script writes the following metadata files under `genfoam/constant/generated/`:
+## Geometry And Mesh
 
-- `concentric_case_manifest.json` — combined source, geometry, mesh, and material payload
-- `concentric_reactor_wedge.msh` — axisymmetric Gmsh wedge mesh for the concentric reactor
-- `concentric_reactor_mesh_manifest.json` — expected physical groups, zone names, geometry, and mesh sizing used for the Gmsh mesh
-- `concentric_mesh_regions.csv` — canonical region-to-cellZone mapping shared by the mesh and MGXS-derived nuclear data
-- `concentric_materials.json` — per-domain multigroup constants and delayed-neutron data in converted units
-- `mgxs_to_genfoam_xs/summary.json` — source-run metadata and artifact paths for the active MGXS-to-GeN-Foam XS workflow
-- `mgxs_to_genfoam_xs/raw_vectors.json` — zone-wise vectors extracted directly from the MGXS export
-- `mgxs_to_genfoam_xs/adapted_vectors.json` — zone-wise vectors after GeN-Foam compatibility sanitization
-- `mgxs_to_genfoam_xs/nuclearData.genfoam` — adapted GeN-Foam `states/reference` nuclear data generated from the MGXS source
+The active geometry is a thin axisymmetric wedge representing the reactor
+`r-z` plane. Dimensions and canonical region names are maintained manually
+from the OpenMC reference model; `model.xml` is not parsed to construct the
+Gmsh geometry.
 
-It also updates the generated GeN-Foam case files in place:
+The mesh preserves material boundaries and uses independent radial and axial
+subdivision counts. Default controls are defined by `MeshSizingDefinition` in
+`gmsh_reactor_mesh.py`. Geometry dimensions are not changed when the mesh is
+refined.
 
-- `constant/neutroRegion/nuclearData`
-- `0/neutroRegion/defaultFlux` through `defaultFlux16`
-
-The following files are now treated as static checked-in case scaffolding:
-
-- `system/controlDict`, `system/regionsDict`
-- `system/neutroRegion/fvSchemes`, `fvSolution`
-- `constant/neutroRegion/neutronicsProperties`
-- `Allclean`, `Allmesh`, `Allrun`
-
-The old `blockMeshDict` path is retired from the active workflow. The earlier full-3D Gmsh path remains experimental only and is not used by `Allmesh` or `Allrun`.
-
-## Mesh Generation
-
-The standalone mesh entry point is:
+To generate a standalone mesh with explicit subdivisions:
 
 ```bash
-python genfoam/gmsh_reactor_mesh.py generate
-```
-
-Useful options:
-
-```bash
-python genfoam/gmsh_reactor_mesh.py generate \
+conda run -n openmc python genfoam/gmsh_reactor_mesh.py generate \
   --mesh-kind axisymmetric-wedge \
   --wedge-angle-deg 1.0 \
-  --fuel-size-m 0.02 \
-  --core-size-m 0.08 \
-  --moderator-size-m 0.2 \
-  --reflector-size-m 0.35
+  --fuel-radial-divisions 3 \
+  --fuel-axial-divisions 12 \
+  --core-radial-divisions 2 \
+  --core-axial-divisions 2
 ```
 
-This writes a `.msh` file plus a JSON manifest and is the same path invoked by `prepare_concentric_case.py` and `./Allmesh`.
+This writes:
 
-To regenerate the earlier full cylinder mesh for comparison only:
+- `constant/generated/concentric_reactor_wedge.msh`
+- `constant/generated/concentric_reactor_mesh_manifest.json`
+
+The centerline is represented by a very small inner cylindrical symmetry
+patch to avoid collapsed-axis defects during `gmshToFoam` import. `Allmesh`
+rewrites the wedge and centerline patch types and validates all expected cell
+zones.
+
+The earlier full-cylinder generator remains experimental and is not used by
+`Allmesh` or `Allrun`:
 
 ```bash
-python genfoam/gmsh_reactor_mesh.py generate \
+conda run -n openmc python genfoam/gmsh_reactor_mesh.py generate \
   --mesh-kind full-3d-experimental \
   --mesh-file genfoam/constant/generated/concentric_reactor_3d.msh
 ```
 
-`gmsh_reactor_mesh.py` now requires a direct `import gmsh` from the active Python environment. The temporary vendored `genfoam/_vendor/gmsh_py` fallback has been removed.
+## MGXS Contract
 
-## Plotting Results
+`openmc/mgxs_export.py` is the MGXS source of truth. The local
+`openmc_to_genfoam_xs.py` writer converts its results to the GeN-Foam
+`states ( reference { zones (...) } )` syntax.
 
-`plot_results.py` supports the legacy r-z block manifest and the new axisymmetric wedge manifest:
+Compatible exports contain:
 
-```bash
-python genfoam/plot_results.py
+- `consistent nu-scatter matrix`
+- `chi-prompt`
+- `scatter_correction = null`
+- `scatter_formulation = "consistent"`
+- one-group `Beta` and decay-rate kinetics data
+
+The writer uses the P0 moment of the consistent nu-scatter matrix and computes:
+
+```text
+sigmaRemoval[g] = total[g] - scatteringMatrixP0[g,g]
 ```
 
-## Current Validation
+`legendre_order=0` and `scatter_correction=None` are separate settings. P0
+selects the isotropic Legendre moment; disabling the correction prevents
+OpenMC from modifying its diagonal with a transport correction.
 
-The generated case has passed these checks:
+Exports created before this contract was added are rejected. Regenerate them
+with `--rerun-mgxs` or rerun `openmc/exportMGXS.ipynb` after reloading the
+current `mgxs_export` module. New notebook exports use the compatible defaults.
 
-- `conda run -n openmc python genfoam/prepare_concentric_case.py`
-- `./Allmesh`
-- `gmshToFoam` on the generated `concentric_reactor_wedge.msh`
-- `conda run -n openmc python genfoam/gmsh_reactor_mesh.py configure-import ...`
-- `checkMesh -region neutroRegion`
-
-Current `checkMesh` status for the imported wedge mesh:
-
-- mesh topology and region import are valid
-- all expected reactor regions are present as OpenFOAM cell zones
-- wedge patches are rewritten to OpenFOAM `wedge` patch types after `gmshToFoam`
-- the centerline patch is rewritten to `symmetryPlane`
-
-## MGXS XS Path
-
-The default XS path reads an existing MGXS export and writes the GeN-Foam `nuclearData` file locally. No OpenMC rerun happens unless you request it.
-
-The helper below compares the raw MGXS-export-derived vectors against the sanitized writer outputs:
-
-```bash
-conda run -n openmc python genfoam/openmc_to_foam_reference.py
-```
-
-To force a fresh MGXS rerun through `openmc/mgxs_export.py`, pass `--rerun-mgxs`. You can also select the scattering order explicitly:
+Optional preparation overrides:
 
 ```bash
 conda run -n openmc python genfoam/prepare_concentric_case.py \
@@ -147,18 +127,80 @@ conda run -n openmc python genfoam/prepare_concentric_case.py \
   --openmc-particles 2000 \
   --openmc-batches 12 \
   --openmc-inactive 4 \
+  --openmc-threads 8 \
   --legendre-order 0
 ```
 
-`MultiGroupXS` must be installed in the active `openmc` environment. The local scripts import it through `openmc/mgxs_export.py`, and they fail immediately if that dependency is missing.
+The adapter sanitizes only solver-invalid values such as non-positive
+diffusion/removal coefficients in inactive or statistically unresolved groups.
+Every intervention is listed in
+`constant/generated/mgxs_to_genfoam_xs/summary.json`.
 
-Outputs are written under `genfoam/constant/generated/mgxs_to_genfoam_reference/`.
+## Reference Comparison
 
-## Next Steps
-- Compare wedge `k_eff` and flux smoothness against the experimental full-3D path.
-- Tighten the remaining adapter sanitization only where the raw MGXS export still produces non-finite or solver-breaking values.
-- Make the generator target a selected group sweep so you can switch between 2, 8, 16, 25, and 40-group cases without editing files by hand.
+`openmc_to_foam_reference.py` runs the installed openmcToFoam
+`MultiGroupXS` implementation and compares it with the local export/writer.
+Use identical statistics and scattering order on both sides:
 
-## Visualization with ParaView
-- either call `paraFoam -region {neutroRegion}` should work.
-- or create a temporary `neutroRegion.foam` file that then you open with paraview
+```bash
+conda run -n openmc python genfoam/openmc_to_foam_reference.py \
+  --rerun-local-mgxs \
+  --local-particles 2000 \
+  --local-batches 12 \
+  --local-inactive 4 \
+  --openmc-to-foam-particles 2000 \
+  --openmc-to-foam-batches 12 \
+  --openmc-to-foam-inactive 4 \
+  --local-legendre-order 0 \
+  --openmc-to-foam-legendre-order 0
+```
+
+With the corrected contract, the two paths agree on
+`scatteringMatrixP0`, `chiPrompt`, `Beta`, and `lambda`; `sigmaRemoval`
+differs only by floating-point roundoff.
+
+## Generated And Static Files
+
+`prepare_concentric_case.py` writes:
+
+- `constant/neutroRegion/nuclearData`
+- `0/neutroRegion/defaultFlux` through `defaultFlux16`
+- `0/neutroRegion/defaultExternalSourceFlux`
+- `constant/generated/concentric_case_manifest.json`
+- `constant/generated/concentric_reactor_wedge.msh`
+- `constant/generated/concentric_reactor_mesh_manifest.json`
+- `constant/generated/concentric_mesh_regions.csv`
+- `constant/generated/concentric_materials.json`
+- `constant/generated/mgxs_to_genfoam_xs/`
+
+The following case scaffolding remains static and checked in:
+
+- `system/controlDict` and `system/regionsDict`
+- `system/neutroRegion/fvSchemes` and `fvSolution`
+- `constant/neutroRegion/neutronicsProperties`
+- `Allclean`, `Allmesh`, and `Allrun`
+
+## Validation And Visualization
+
+`Allmesh` performs:
+
+- `gmshToFoam`
+- imported boundary and cell-zone configuration
+- `checkMesh -region neutroRegion`
+- manifest-based patch and cell-zone validation
+
+Plot extracted results with:
+
+```bash
+conda run -n openmc python genfoam/plot_results.py
+```
+
+For ParaView:
+
+```bash
+cd genfoam
+paraFoam -region neutroRegion
+```
+
+Alternatively, create `genfoam/neutroRegion.foam` and open it directly in
+ParaView.

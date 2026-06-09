@@ -5,6 +5,8 @@ import csv
 import json
 import math
 import shutil
+import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +22,7 @@ from openmc_to_genfoam_xs import (
     DEFAULT_OUTPUT_SUBDIR as DEFAULT_GENFOAM_XS_OUTPUT_SUBDIR,
     build_nuclear_data_text_from_export,
     generate_genfoam_xs,
+    select_scatter_matrix_payload,
 )
 
 
@@ -29,6 +32,14 @@ DEFAULT_MGXS_EXPORT_DIR = PROJECT_DIR / "openmc" / "build" / "concentric" / "mgx
 DEFAULT_OUTPUT_DIR = CASE_DIR / "constant" / "generated"
 CM_TO_M = 1.0e-2
 EV_TO_J = 1.602176487e-19
+
+
+def _format_elapsed(seconds: float) -> str:
+    return f"{seconds:.2f}s"
+
+
+def _progress(message: str) -> None:
+    print(f"[prepare_concentric_case] {message}", file=sys.stderr, flush=True)
 
 
 def require_dir(path: Path) -> Path:
@@ -87,8 +98,10 @@ def sanitize_diffusion_coefficients(
     diffusion_m = [float(value) * 1.0e-2 for value in group_constants["diffusion-coefficient"]["mean"]]
     absorption_m = [float(value) * 100.0 for value in group_constants["absorption"]["mean"]]
     nu_fission_m = [float(value) * 100.0 for value in group_constants["nu-fission"]["mean"]]
-    chi = [float(value) for value in group_constants["chi"]["mean"]]
-    scatter_matrix = _collapse_legendre_moment(group_constants["scatter matrix"]["mean"])
+    chi_payload = group_constants.get("chi-prompt", group_constants["chi"])
+    chi = [float(value) for value in chi_payload["mean"]]
+    _scatter_name, scatter_payload = select_scatter_matrix_payload(group_constants)
+    scatter_matrix = _collapse_legendre_moment(scatter_payload["mean"])
 
     for group_index, value_m in enumerate(diffusion_m):
         needs_fix = not math.isfinite(value_m) or value_m <= 0.0 or value_m > max_diffusion_m
@@ -151,7 +164,7 @@ def convert_group_constants_to_si(domain_label: str, group_constants: dict[str, 
                 "units": "m",
             }
             continue
-        if xs_type in {"scatter matrix", "nu-scatter matrix"}:
+        if xs_type in {"scatter matrix", "nu-scatter matrix", "consistent nu-scatter matrix"}:
             converted[xs_type] = {
                 "mean": _deep_scale(mean_value, 100.0),
                 "std_dev": _deep_scale(std_dev_value, 100.0),
@@ -352,6 +365,8 @@ def build_case_spec(
     openmc_threads: int | None = None,
     legendre_order: int | None = None,
 ) -> dict[str, Any]:
+    stage_start = time.perf_counter()
+    _progress(f"Loading MGXS export from {mgxs_export_dir}")
     mgxs_export_dir = require_dir(mgxs_export_dir)
     model_xml_path = require_file(mgxs_export_dir / "reactor_run" / "model.xml")
     mgxs_json_path = require_file(mgxs_export_dir / "outputs" / "mgxs_constants.json")
@@ -365,6 +380,15 @@ def build_case_spec(
         geometry=manual_geometry,
         mesh_kind=WEDGE_MESH_KIND,
     )
+    _progress(
+        "Loaded MGXS metadata: "
+        f"{len(export['config']['energy_group_edges_ev']) - 1} groups, "
+        f"P{export['config']['legendre_order']}, "
+        f"{len(export['config']['domain_definitions'])} regions, "
+        f"{len(mesh_info['blocks'])} mesh blocks "
+        f"({len(mesh_info['radial_edges_m']) - 1} radial x {len(mesh_info['axial_edges_m']) - 1} axial intervals) "
+        f"in {_format_elapsed(time.perf_counter() - stage_start)}"
+    )
 
     domain_order = [label for label, _ in export["config"]["domain_definitions"]]
     configured_regions = {item["region"] for item in region_mapping}
@@ -375,6 +399,9 @@ def build_case_spec(
         domain_label: build_material_payload(export, domain_label)
         for domain_label in domain_order
     }
+    stage_start = time.perf_counter()
+    xs_mode = "rerun" if rerun_mgxs else "existing export"
+    _progress(f"Building GeN-Foam XS payload from {xs_mode}")
     genfoam_xs_output_dir = output_dir / DEFAULT_GENFOAM_XS_OUTPUT_SUBDIR
     genfoam_xs = generate_genfoam_xs(
         mgxs_export_dir=mgxs_export_dir,
@@ -385,6 +412,14 @@ def build_case_spec(
         inactive=openmc_inactive,
         threads=openmc_threads,
         legendre_order=legendre_order,
+    )
+    reference_run = genfoam_xs["reference_run"]
+    _progress(
+        "Built XS payload in "
+        f"{_format_elapsed(time.perf_counter() - stage_start)} "
+        f"(source keff={reference_run['keff']}, "
+        f"promptGenerationTime={reference_run['prompt_generation_time_s']:.12g}s, "
+        f"mode={genfoam_xs['source']['mode']})"
     )
 
     return {
@@ -421,11 +456,16 @@ def write_case_outputs(case_spec: dict[str, Any], output_dir: Path) -> dict[str,
         "genfoam_xs_summary": Path(case_spec["genfoam_xs"]["files"]["summary"]),
         "genfoam_xs_adapted_nuclear_data": Path(case_spec["genfoam_xs"]["files"]["adapted_nuclear_data"]),
     }
+    stage_start = time.perf_counter()
+    _progress(f"Generating wedge mesh at {files['mesh_file']}")
     write_mesh_assets(
         mesh_file=files["mesh_file"],
         manifest_file=files["mesh_manifest"],
         mesh_kind=WEDGE_MESH_KIND,
     )
+    _progress(f"Generated mesh in {_format_elapsed(time.perf_counter() - stage_start)}")
+    stage_start = time.perf_counter()
+    _progress(f"Writing case metadata under {output_dir}")
     write_json(files["manifest"], case_spec)
     write_json(files["materials"], {"materials": case_spec["materials"], "config": case_spec["config"]})
     write_csv(
@@ -433,6 +473,7 @@ def write_case_outputs(case_spec: dict[str, Any], output_dir: Path) -> dict[str,
         rows=case_spec["mesh_regions"],
         fieldnames=["region", "cell_zone"],
     )
+    _progress(f"Wrote case metadata in {_format_elapsed(time.perf_counter() - stage_start)}")
     return files
 
 
@@ -492,6 +533,7 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    run_start = time.perf_counter()
     rerun_mgxs = args.rerun_mgxs or any(
         value is not None
         for value in (
@@ -501,6 +543,10 @@ def main() -> None:
             args.openmc_threads,
             args.legendre_order,
         )
+    )
+    _progress(
+        "Starting case preparation "
+        f"(mgxs_export_dir={args.mgxs_export_dir}, output_dir={args.output_dir}, rerun_mgxs={rerun_mgxs})"
     )
     case_spec = build_case_spec(
         args.mgxs_export_dir,
@@ -513,7 +559,10 @@ def main() -> None:
         legendre_order=args.legendre_order,
     )
     files = write_case_outputs(case_spec, args.output_dir)
+    stage_start = time.perf_counter()
+    _progress(f"Writing OpenFOAM case files into {CASE_DIR}")
     generated_case_files = write_generated_case_files(case_spec, CASE_DIR)
+    _progress(f"Wrote OpenFOAM case files in {_format_elapsed(time.perf_counter() - stage_start)}")
 
     rendered_generated_case_files: dict[str, Any] = {}
     for name, value in generated_case_files.items():
@@ -534,6 +583,7 @@ def main() -> None:
             indent=2,
         )
     )
+    _progress(f"Completed case preparation in {_format_elapsed(time.perf_counter() - run_start)}")
 
 
 if __name__ == "__main__":
