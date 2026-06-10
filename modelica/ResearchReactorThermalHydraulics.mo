@@ -50,7 +50,7 @@ model ResearchReactorThermalHydraulics
     m_flow_small = 1.0,
     energyDynamics = Modelica.Fluid.Types.Dynamics.FixedInitial,
     massDynamics = Modelica.Fluid.Types.Dynamics.DynamicFreeInitial)
-    annotation(Placement(transformation(origin = {0, -60}, extent = {{-90, 70}, {-70, 90}})));
+    annotation(Placement(transformation(origin = {150, 4}, extent = {{-90, 70}, {-70, 90}})));
 
   // ── Inlet plenum (top of core; acts as closed-loop pressure reference) ────
   Modelica.Fluid.Vessels.ClosedVolume inletPlenum(
@@ -61,7 +61,7 @@ model ResearchReactorThermalHydraulics
     use_HeatTransfer = true,
     p_start     = 4.0e5,
     T_start     = T_in_nom)
-    annotation(Placement(transformation(origin = {0, -60}, extent = {{-40, 60}, {-20, 80}})));
+    annotation(Placement(transformation(origin = {8, 26}, extent = {{-24, 36}, {-12, 48}})));
 
   // ── Reactor pool (thermal reservoir only; no hydraulic coupling) ─────────
   Modelica.Fluid.Vessels.OpenTank poolInventory(
@@ -73,7 +73,7 @@ model ResearchReactorThermalHydraulics
     use_HeatTransfer = true,
     T_start     = T_in_nom,
     T_ambient   = system.T_ambient)
-    annotation(Placement(transformation(origin = {0, -60}, extent = {{-98, 100}, {-74, 124}})));
+    annotation(Placement(transformation(origin = {64.8333, -101.667}, extent = {{-138.833, 141.667}, {-104.833, 175.667}})));
 
   // ── Pressure reference for the primary loop ──────────────────────────────
   //   This keeps the cooling circuit independent of the pool while avoiding
@@ -84,19 +84,19 @@ model ResearchReactorThermalHydraulics
     nPorts      = 1,
     p           = system.p_start,
     T           = T_in_nom)
-    annotation(Placement(transformation(origin = {0, -60}, extent = {{-72, 54}, {-52, 74}})));
+    annotation(Placement(transformation(origin = {7.2, 23.6}, extent = {{-43.2, 32.4}, {-31.2, 44.4}})));
 
   Modelica.Thermal.HeatTransfer.Components.ThermalConductor poolMixing(
     G = G_pool_mix)
-    annotation(Placement(transformation(origin = {0, -60}, extent = {{-62, 88}, {-46, 104}})));
+    annotation(Placement(transformation(origin = {4.75, 29}, extent = {{-38.75, 55}, {-28.75, 65}})));
 
   Modelica.Thermal.HeatTransfer.Components.ThermalConductor poolAmbientLoss(
     G = G_pool_ambient)
-    annotation(Placement(transformation(origin = {0, -60}, extent = {{-86, 72}, {-70, 88}})));
+    annotation(Placement(transformation(origin = {-16.75, -35}, extent = {{-75.25, 63}, {-61.25, 77}})));
 
   Modelica.Thermal.HeatTransfer.Sources.FixedTemperature ambientPoolBoundary(
     T = system.T_ambient)
-    annotation(Placement(transformation(origin = {0, -60}, extent = {{-110, 70}, {-94, 86}})));
+    annotation(Placement(transformation(origin = {14, -70}, extent = {{-110, 70}, {-94, 86}})));
 
   // ── Effective core channel (top -> bottom, nAxialNodes cells) ─────────────
   //   A single axially-discretised pipe represents the entire active-core
@@ -125,7 +125,7 @@ model ResearchReactorThermalHydraulics
     state_a(p(start = 4.0e5)),
     state_b(p(start = 3.999e5)),
     statesFM(each p(start = 3.9995e5)))
-    annotation(Placement(transformation(origin = {0, -60}, extent = {{-40, 20}, {-20, 40}})));
+    annotation(Placement(transformation(origin = {-66, -60}, extent = {{-76, 38}, {-38, 76}}, rotation = -90)));
 
   // ── Outlet plenum (bottom of core) ────────────────────────────────────────
   Modelica.Fluid.Vessels.ClosedVolume outletPlenum(
@@ -135,7 +135,7 @@ model ResearchReactorThermalHydraulics
     use_portsData = false,
     p_start     = 3.999e5,
     T_start     = T_out_nom)
-    annotation(Placement(transformation(origin = {0, -60}, extent = {{-40, -20}, {-20, 0}})));
+    annotation(Placement(transformation(origin = {12, -84}, extent = {{-28, 14}, {-14, -0}}, rotation = -0)));
 
   Modelica.Fluid.Pipes.StaticPipe inletPipe(
     redeclare package Medium = Medium,
@@ -144,7 +144,7 @@ model ResearchReactorThermalHydraulics
     p_a_start = 4.0e5,
     p_b_start = 4.0e5,
     m_flow_start = m_flow_nominal)
-    annotation(Placement(transformation(origin = {0, -60}, extent = {{-40, 30}, {-20, 50}})));
+    annotation(Placement(transformation(origin = {-52.6433, 16.5017}, extent = {{-38.1207, 32.304}, {-19.0604, 53.84}}, rotation = -90)));
 
   Modelica.Fluid.Pipes.StaticPipe outletPipe(
     redeclare package Medium = Medium,
@@ -153,7 +153,7 @@ model ResearchReactorThermalHydraulics
     p_a_start = 3.999e5,
     p_b_start = 3.999e5,
     m_flow_start = m_flow_nominal)
-    annotation(Placement(transformation(origin = {0, -60}, extent = {{-40, 0}, {-20, 20}})));
+    annotation(Placement(transformation(origin = {-20, -78}, extent = {{-44, 0}, {-22, 22}}, rotation = -90)));
 
   Modelica.Fluid.Pipes.StaticPipe suctionPipe(
     redeclare package Medium = Medium,
@@ -162,7 +162,7 @@ model ResearchReactorThermalHydraulics
     p_a_start = 3.999e5,
     p_b_start = 3.999e5,
     m_flow_start = m_flow_nominal)
-    annotation(Placement(transformation(origin = {0, -60}, extent = {{-8, -20}, {10, 0}})));
+    annotation(Placement(transformation(origin = {14, -60}, extent = {{-8, -20}, {10, 0}})));
 
   // ── Primary pump (flow-controlled: imposes m_flow = m_flow_nominal) ───────
   //   Use control_m_flow = true for first-pass thermal studies.
@@ -180,12 +180,12 @@ model ResearchReactorThermalHydraulics
     p_b_start  = 4.005e5,
     p_a_nominal = 3.9e5,
     p_b_nominal = 4.1e5)
-    annotation(Placement(transformation(origin = {0, -60}, extent = {{10, -20}, {30, 0}})));
+    annotation(Placement(transformation(origin = {18, -60}, extent = {{10, -20}, {30, 0}})));
 
   // ── Mass-flow sensor (between pump outlet and HX inlet) ───────────────────
   Modelica.Fluid.Sensors.MassFlowRate sensor_m(
     redeclare package Medium = Medium)
-    annotation(Placement(transformation(origin = {0, -60}, extent = {{40, -20}, {60, 0}})));
+    annotation(Placement(transformation(origin = {46, -83.1921}, extent = {{24.284, -11.8911}, {36.4261, 0}}, rotation = 90)));
 
   Modelica.Fluid.Pipes.StaticPipe pumpToHxPipe(
     redeclare package Medium = Medium,
@@ -194,7 +194,7 @@ model ResearchReactorThermalHydraulics
     p_a_start = 4.005e5,
     p_b_start = 4.005e5,
     m_flow_start = m_flow_nominal)
-    annotation(Placement(transformation(origin = {0, -60}, extent = {{60, 18}, {80, 38}})));
+    annotation(Placement(transformation(origin = {80, -96}, extent = {{60, 18}, {80, 38}}, rotation = 90)));
 
   // ── Primary-side HX pipe ──────────────────────────────────────────────────
   //   Single-node DynamicPipe with IdealFlowHeatTransfer.  Heat is removed
@@ -220,7 +220,7 @@ model ResearchReactorThermalHydraulics
     state_a(p(start = 4.005e5)),
     state_b(p(start = 4.0e5)),
     statesFM(each p(start = 4.0025e5)))
-    annotation(Placement(transformation(origin = {0, -60}, extent = {{60, 54}, {80, 74}})));
+    annotation(Placement(transformation(origin = {-37.6, -76}, extent = {{-84, 75.6}, {-112, 103.6}}, rotation = -90)));
 
   Modelica.Fluid.Pipes.StaticPipe returnPipe(
     redeclare package Medium = Medium,
@@ -229,64 +229,64 @@ model ResearchReactorThermalHydraulics
     p_a_start = 4.0e5,
     p_b_start = 4.0e5,
     m_flow_start = m_flow_nominal)
-    annotation(Placement(transformation(origin = {0, -60}, extent = {{18, 60}, {38, 80}})));
+    annotation(Placement(transformation(origin = {52, 132}, extent = {{18, 60}, {38, 80}}, rotation = 180)));
 
   // ── HX thermal boundary (secondary side = fixed 20 degC heat sink) ────────
   Modelica.Thermal.HeatTransfer.Components.ThermalConductor hxWall[nHxNodes](
     each G = UA_hx / nHxNodes)
-    annotation(Placement(transformation(origin = {0, -60}, extent = {{90, 60}, {110, 80}})));
+    annotation(Placement(transformation(origin = {-26, -48}, extent = {{90, 60}, {110, 80}})));
 
   Modelica.Thermal.HeatTransfer.Sources.FixedTemperature T_sec(
     T = T_sec_fixed)
-    annotation(Placement(transformation(origin = {0, -60}, extent = {{140, 60}, {120, 80}})));
+    annotation(Placement(transformation(origin = {190, 112}, extent = {{126, 54}, {108, 72}}, rotation = 180)));
 
   // ── Distributed core heat sources (driven by FMI input) ───────────────────
   Modelica.Thermal.HeatTransfer.Sources.PrescribedHeatFlow coreHeat[nAxialNodes]
-    annotation(Placement(transformation(origin = {0, -60}, extent = {{-90, 20}, {-70, 40}})));
+    annotation(Placement(transformation(origin = {-76, -40}, extent = {{108, 24}, {84, 48}})));
 
   // ── Temperature sensors ───────────────────────────────────────────────────
   Modelica.Fluid.Sensors.Temperature sensor_T_in(
     redeclare package Medium = Medium)
-    annotation(Placement(transformation(origin = {0, -60}, extent = {{-80, 60}, {-60, 80}})));
+    annotation(Placement(transformation(origin = {8, -8}, extent = {{-48, 30}, {-36, 40}})));
 
   Modelica.Fluid.Sensors.Temperature sensor_T_out(
     redeclare package Medium = Medium)
-    annotation(Placement(transformation(origin = {0, -60}, extent = {{-80, -20}, {-60, 0}})));
+    annotation(Placement(transformation(origin = {8, -20}, extent = {{-48, -10}, {-36, 0}})));
 
   // ── Pressure sensors (for core pressure-drop output) ──────────────────────
   Modelica.Fluid.Sensors.Pressure sensor_p_in(
     redeclare package Medium = Medium)
-    annotation(Placement(transformation(origin = {0, -60}, extent = {{-10, 60}, {10, 80}})));
+    annotation(Placement(transformation(origin = {18, -14}, extent = {{-6, 36}, {6, 48}})));
 
   Modelica.Fluid.Sensors.Pressure sensor_p_out(
     redeclare package Medium = Medium)
-    annotation(Placement(transformation(origin = {0, -60}, extent = {{-10, -20}, {10, 0}})));
+    annotation(Placement(transformation(origin = {18, -20}, extent = {{-6, -12}, {6, 0}})));
 
   // ── FMI inputs ────────────────────────────────────────────────────────────
   Modelica.Blocks.Interfaces.RealInput totalPower(
     unit  = "W",
     min   = 0,
     start = P_nominal)
-    annotation(Placement(transformation(origin = {0, -60}, extent = {{-130, 10}, {-110, 30}}), iconTransformation(extent = {{-130, 10}, {-110, 30}})));
+    annotation(Placement(transformation(origin = {38, -54}, extent = {{-130, 10}, {-110, 30}}), iconTransformation(extent = {{-130, 10}, {-110, 30}})));
 
   Modelica.Blocks.Interfaces.RealInput axialPowerFractions[nAxialNodes](
     each unit  = "1",
     each min   = 0,
     each start = 1.0 / nAxialNodes)
-    annotation(Placement(transformation(origin = {0, -60}, extent = {{-130, -10}, {-110, 10}}), iconTransformation(extent = {{-130, -10}, {-110, 10}})));
+    annotation(Placement(transformation(origin = {38, -58}, extent = {{-130, -10}, {-110, 10}}), iconTransformation(extent = {{-130, -10}, {-110, 10}})));
 
   // ── FMI outputs ───────────────────────────────────────────────────────────
   Modelica.Blocks.Interfaces.RealOutput T_inlet(unit = "K")
-    annotation(Placement(transformation(origin = {0, -60}, extent = {{110, 70}, {130, 90}}), iconTransformation(extent = {{110, 70}, {130, 90}})));
+    annotation(Placement(transformation(origin = {-32, -94}, extent = {{110, 70}, {130, 90}}), iconTransformation(extent = {{110, 70}, {130, 90}})));
 
   Modelica.Blocks.Interfaces.RealOutput T_outlet(unit = "K")
-    annotation(Placement(transformation(origin = {0, -60}, extent = {{110, 50}, {130, 70}}), iconTransformation(extent = {{110, 50}, {130, 70}})));
+    annotation(Placement(transformation(origin = {-32, -94}, extent = {{110, 50}, {130, 70}}), iconTransformation(extent = {{110, 50}, {130, 70}})));
 
   Modelica.Blocks.Interfaces.RealOutput massFlow(unit = "kg/s")
-    annotation(Placement(transformation(origin = {0, -60}, extent = {{110, 30}, {130, 50}}), iconTransformation(extent = {{110, 30}, {130, 50}})));
+    annotation(Placement(transformation(origin = {-32, -94}, extent = {{110, 30}, {130, 50}}), iconTransformation(extent = {{110, 30}, {130, 50}})));
 
   Modelica.Blocks.Interfaces.RealOutput dp_core(unit = "Pa")
-    annotation(Placement(transformation(origin = {0, -60}, extent = {{110, 10}, {130, 30}}), iconTransformation(extent = {{110, 10}, {130, 30}})));
+    annotation(Placement(transformation(origin = {-32, -96}, extent = {{110, 10}, {130, 30}}), iconTransformation(extent = {{110, 10}, {130, 30}})));
 
 protected
   Real positiveFractions[nAxialNodes](each unit = "1");
@@ -318,58 +318,58 @@ equation
   T_outlet = sensor_T_out.T;
   massFlow = sensor_m.m_flow;
   dp_core  = sensor_p_in.p - sensor_p_out.p;
-
-  // ── Primary loop fluid connections ────────────────────────────────────────
-  connect(inletPlenum.ports[1], inletPipe.port_a)
-    annotation(Line(points = {{-30, 0}, {-30, -10}}, color = {0, 127, 255}));
-  connect(inletPipe.port_b, core.port_a)
-    annotation(Line(points = {{-20, -20}, {-20, -20}, {-20, -30}}, color = {0, 127, 255}));
-  connect(core.port_b, outletPipe.port_a)
-    annotation(Line(points = {{-20, -30}, {-20, -40}}, color = {0, 127, 255}));
+// ── Primary loop fluid connections ────────────────────────────────────────
+  connect(core.port_b, outletPipe.port_a) annotation(
+    Line(points = {{-9, -22}, {-9, -34}}, color = {0, 127, 255}));
   connect(outletPipe.port_b, outletPlenum.ports[1])
-    annotation(Line(points = {{-20, -50}, {-20, -60}}, color = {0, 127, 255}));
+    annotation(Line(points = {{-9, -56}, {-9, -70}}, color = {0, 127, 255}));
   connect(outletPlenum.ports[2], suctionPipe.port_a)
-    annotation(Line(points = {{-30, -80}, {-30, -70}, {-8, -70}}, color = {0, 127, 255}));
+    annotation(Line(points = {{-9, -70}, {6, -70}}, color = {0, 127, 255}));
   connect(suctionPipe.port_b, pump.port_a)
-    annotation(Line(points = {{10, -70}, {10, -70}}, color = {0, 127, 255}));
-  connect(pump.port_b, sensor_m.port_a)
-    annotation(Line(points = {{30, -70}, {40, -70}}, color = {0, 127, 255}));
-  connect(sensor_m.port_b, pumpToHxPipe.port_a)
-    annotation(Line(points = {{60, -70}, {70, -70}, {70, -42}}, color = {0, 127, 255}));
+    annotation(Line(points = {{24, -70}, {28, -70}}, color = {0, 127, 255}));
   connect(pumpToHxPipe.port_b, hxPipe.port_a)
-    annotation(Line(points = {{80, -32}, {90, -32}, {90, 4}, {80, 4}}, color = {0, 127, 255}));
+    annotation(Line(points = {{52, -16}, {51.625, -16}, {51.625, 8}, {52, 8}}, color = {0, 127, 255}));
   connect(hxPipe.port_b, returnPipe.port_a)
-    annotation(Line(points = {{80, 4}, {70, 4}, {70, 10}, {58, 10}}, color = {0, 127, 255}));
-  connect(returnPipe.port_b, inletPlenum.ports[2])
-    annotation(Line(points = {{38, 10}, {10, 10}, {10, 20}, {-10, 20}}, color = {0, 127, 255}));
-  connect(inletPlenum.ports[3], pressureBoundary.ports[1])
-    annotation(Line(points = {{-30, 0}, {-30, 12}, {-62, 12}, {-62, -26}}, color = {0, 127, 255}));
-
-  // ── Sensor port taps (zero-flow connections to existing fluid nodes) ───────
-  connect(sensor_T_in.port, core.port_a)
-    annotation(Line(points = {{-70, 0}, {-60, 0}, {-60, -40}, {-30, -40}}, color = {0, 127, 255}));
-  connect(sensor_T_out.port, core.port_b)
-    annotation(Line(points = {{-70, -80}, {-60, -80}, {-60, -40}, {-30, -40}}, color = {0, 127, 255}));
-  connect(sensor_p_in.port, core.port_a)
-    annotation(Line(points = {{0, 0}, {20, 0}, {20, -40}, {-20, -40}}, color = {0, 127, 255}));
-  connect(sensor_p_out.port, core.port_b)
-    annotation(Line(points = {{0, -80}, {20, -80}, {20, -40}, {-20, -40}}, color = {0, 127, 255}));
-
-  connect(inletPlenum.heatPort, poolMixing.port_a)
-    annotation(Line(points = {{-40, 10}, {-40, 36}, {-72, 36}}, color = {191, 0, 0}));
-  connect(poolMixing.port_b, poolInventory.heatPort)
-    annotation(Line(points = {{-46, 36}, {-46, 52}, {-74, 52}}, color = {191, 0, 0}));
-  connect(poolInventory.heatPort, poolAmbientLoss.port_a)
-    annotation(Line(points = {{-98, 52}, {-110, 52}, {-110, 20}}, color = {191, 0, 0}));
+    annotation(Line(points = {{52, 36}, {52, 62}, {34, 62}}, color = {0, 127, 255}));
+  connect(returnPipe.port_b, inletPlenum.ports[1]) annotation(
+    Line(points = {{14, 62}, {-10, 62}}, color = {0, 127, 255}));
+  connect( inletPlenum.ports[2], pressureBoundary.ports[1]) annotation(
+    Line(points = {{-10, 62}, {-24, 62}}, color = {0, 127, 255}));
+// ── Sensor port taps (zero-flow connections to existing fluid nodes) ───────
+  connect(poolInventory.heatPort, poolAmbientLoss.port_a) annotation(
+    Line(points = {{-74, 57}, {-96, 57}, {-96, 35}, {-92, 35}}, color = {191, 0, 0}));
   connect(poolAmbientLoss.port_b, ambientPoolBoundary.port)
-    annotation(Line(points = {{-70, 20}, {-94, 20}}, color = {191, 0, 0}));
+    annotation(Line(points = {{-78, 35}, {-78, 35.5}, {-70, 35.5}, {-70, 7.375}, {-80, 7.375}, {-80, 8}}, color = {191, 0, 0}));
 
   // ── HX thermal path ───────────────────────────────────────────────────────
   for i in 1:nHxNodes loop
     connect(hxPipe.heatPorts[i], hxWall[i].port_a);
     connect(hxWall[i].port_b, T_sec.port);
   end for;
-
+  connect(poolMixing.port_a, poolInventory.heatPort) annotation(
+    Line(points = {{-34, 89}, {-74, 89}, {-74, 57}}, color = {191, 0, 0}));
+  connect(inletPipe.port_a, inletPlenum.ports[3]) annotation(
+    Line(points = {{-10, 55}, {-10, 62}}, color = {0, 127, 255}));
+  connect(inletPlenum.heatPort, poolMixing.port_b) annotation(
+    Line(points = {{-16, 68}, {-20, 68}, {-20, 89}, {-24, 89}}, color = {191, 0, 0}));
+  connect(sensor_T_out.port, core.port_b) annotation(
+    Line(points = {{-34, -30}, {-34, -32}, {-8, -32}, {-8, -22}}, color = {0, 127, 255}));
+  connect(sensor_p_out.port, core.port_b) annotation(
+    Line(points = {{18, -32}, {-8, -32}, {-8, -22}}, color = {0, 127, 255}));
+  connect(inletPipe.port_b, core.port_a) annotation(
+    Line(points = {{-10, 36}, {-10, 15.5}, {-8, 15.5}, {-8, 16}}, color = {0, 127, 255}));
+  connect(sensor_T_in.port, core.port_a) annotation(
+    Line(points = {{-34, 22}, {-34, 18}, {-8, 18}, {-8, 16}}, color = {0, 127, 255}));
+  connect(sensor_p_in.port, core.port_a) annotation(
+    Line(points = {{18, 22}, {18, 18}, {-8, 18}, {-8, 16}}, color = {0, 127, 255}));
+  connect(pump.port_b, sensor_m.port_a) annotation(
+    Line(points = {{48, -70}, {52, -70}, {52, -59}}, color = {0, 127, 255}));
+  connect(sensor_m.port_b, pumpToHxPipe.port_a) annotation(
+    Line(points = {{52, -46}, {52, -36}}, color = {0, 127, 255}));
+  connect(coreHeat.port, core.heatPorts) annotation(
+    Line(points = {{8, -4}, {0, -4}}, color = {191, 0, 0}, thickness = 0.5));
+  connect(hxWall.port_a, hxPipe.heatPorts) annotation(
+    Line(points = {{64, 22}, {58, 22}}, color = {191, 0, 0}, thickness = 0.5));
   annotation(
     Documentation(info = "<html>
 <p>
