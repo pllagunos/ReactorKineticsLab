@@ -35,12 +35,14 @@ The most important architectural points are:
 \begin{quote}
 The repository now contains \textbf{two parallel modeling tracks}: an
 \textbf{OpenMC-informed resolved multigroup diffusion} pipeline that generates
-transport-quality group constants from Monte Carlo and solves the eigenvalue
-problem on the resolved cell geometry, and an \textbf{interactive one-group
-web application} with a fast \textbf{point-kinetics surrogate} on the Overview
-page and a \textbf{spatially resolved 2D diffusion transient} on the Transient
-Diffusion page.  The multigroup pipeline is intended to recalibrate the
-constants and rod-worth curves that the interactive models consume.
+transport-derived, cell-homogenized group constants from Monte Carlo and solves
+the diffusion eigenvalue problem while preserving the exported cell regions,
+and an \textbf{interactive one-group web application} with a fast
+\textbf{point-kinetics surrogate} on the Overview page and a
+\textbf{spatially resolved 2D diffusion transient} on the Transient Diffusion
+page.  The multigroup pipeline is an offline verification and future
+calibration path; its exploratory rod model is not yet the source of the web
+application's production rod-worth curve.
 \end{quote}
 
 \section{Role of the notebook}
@@ -761,7 +763,7 @@ modules rather than notebook-only logic:
         parse the OpenMC \texttt{model.xml} to extract cell boundaries
         (z-cylinders and z-planes), load the canonical
         \texttt{mgxs\_constants.json}, validate the scattering contract,
-        convert constants to SI, and map each OpenMC cell to a
+        preserve the centimeter-based OpenMC units, and map each OpenMC cell to a
         \texttt{MultiGroupRegion} inside a \texttt{CylindricalLayeredModel2D}.
   \item \textbf{Finite-volume multigroup diffusion solver}
         (\texttt{backend/reactor\_backend/multigroup\_diffusion.py}):
@@ -805,14 +807,32 @@ run:
         canonical diffusion JSON.
 \end{itemize}
 
+When \texttt{validation\_scatter\_correction = P0}, the export contract requires
+\texttt{legendre\_order = 0}, because OpenMC does not apply that correction to
+a higher-order Legendre library.  A higher-order canonical export can still be
+read by the adapter, but the validation correction must be disabled for that
+run and the diffusion path will retain only moment zero.
+
 The diffusion coefficient is taken directly from OpenMC's transport
 cross-section tally:
 \[
 D_g = \frac{1}{3\,\Sigma_{\mathrm{tr},g}} .
 \]
 
-The transport correction applied (or not) to the within-group scatter term
-is a separate concept and is deliberately excluded from the diffusion path.
+This distinction is important.  OpenMC's P0 scatter correction modifies the
+isotropic scattering data used by its multigroup \emph{transport} calculation
+to represent part of the first angular moment.  The diffusion calculation
+instead represents anisotropic migration through $\Sigma_{\mathrm{tr},g}$ in
+$D_g$.  Its scattering source therefore uses the uncorrected non-$\nu$ P0
+reaction-rate matrix.  The two calculations use different angular closures;
+agreement of the OpenMC multigroup validation does not imply that the
+diffusion approximation has been calibrated.
+
+All neutronics quantities remain in OpenMC's native centimeter-based units:
+$D$ in cm, macroscopic cross sections in cm$^{-1}$, and geometry and mesh
+dimensions in cm.  No SI conversion is performed in the adapter.  This gives
+$D\nabla^2\phi$ and $\Sigma\phi$ consistent units throughout the steady
+solver.
 
 Each export run produces:
 \begin{itemize}
@@ -846,16 +866,19 @@ OpenMC export and the diffusion solver.  It performs five operations:
         reflector) or whose MGXS domain labels do not match the XML cell names.
   \item \textbf{Scattering-matrix selection.}  Prefers
         \texttt{consistent scatter matrix}; falls back to \texttt{scatter matrix}.
-        Discards any Legendre moments above P0.
-  \item \textbf{Unit conversion.}  Converts all macroscopic cross sections
-        from cm$^{-1}$ to m$^{-1}$, diffusion coefficients from cm to m,
-        inverse velocities from s/cm to s/m, and $\kappa\Sigma_f$ from
-        eV/cm to J/m.
+        Discards any Legendre moments above P0 and interprets the stored matrix
+        as $\Sigma_{s,g'\rightarrow g}$, with the first group index denoting the
+        source group and the second the destination group.
+  \item \textbf{Diffusion-coefficient validation.}  For every active
+        region/group pair, checks that the exported coefficient is finite,
+        positive, and consistent with
+        $D_g=1/(3\Sigma_{\mathrm{tr},g})$ to numerical precision.
   \item \textbf{Inactive-group sanitization.}  Energy groups with zero
         absorption, zero fission, zero chi, and zero scatter coupling are
         flagged as inactive.  Their undefined diffusion coefficients are
-        replaced with the value from the nearest active group so the spatial
-        operator remains well-posed.
+        replaced with a finite coefficient from another active group so the
+        spatial operator remains well-posed; every replacement is reported in
+        the adapter summary.
 \end{enumerate}
 
 The output is a \texttt{CylindricalLayeredModel2D} containing one
@@ -863,7 +886,10 @@ The output is a \texttt{CylindricalLayeredModel2D} containing one
 vectors for $D$, $\Sigma_a$, $\nu\Sigma_f$, $\chi$, and a $G\times G$ P0
 scattering matrix $\Sigma_{s,g'\to g}$.  The radial mesh is fitted exactly
 to all XML-derived material boundaries so no interface is lost to grid
-coarsening.
+coarsening.  ``Resolved'' here means that no new cross-cell homogenization is
+introduced: each exported cell receives its own constants.  The constants are
+still flux-weighted averages within that OpenMC tally cell, so this is not a
+pin-resolved or continuously varying material description.
 
 \subsection{Finite-volume multigroup diffusion solver}
 
@@ -884,31 +910,81 @@ steady-state diffusion eigenvalue problem on a 2D cylindrical $(r,z)$ mesh:
 The left-hand side collects leakage, absorption, and outscatter from group
 $g$ into a single loss operator $A_g$.  The right-hand side contains the
 fission source (scaled by $1/k_{\mathrm{eff}}$) and in-scatter from all other
-groups.  Within-group scattering is retained on the loss side through the
-removal definition.
+groups.  Within-group scattering does not appear explicitly because its loss
+and gain terms cancel in the group balance.  Thus the removal coefficient used
+in $A_g$ is
+\[
+\Sigma_{r,g} =
+\Sigma_{a,g} + \sum_{g'\ne g}\Sigma_{s,g\to g'} .
+\]
 
 \subsubsection{Spatial discretization}
 
-The mesh is a cell-centered finite-volume grid in cylindrical coordinates.
-On each cell $(i,j)$ at radial position $r_i$ and axial position $z_j$, the
-leakage operator is assembled as:
+The mesh is a nonuniform, cell-centered finite-volume grid in cylindrical
+coordinates.  Every material radius and axial plane extracted from
+\texttt{model.xml} is inserted as a mesh face before the intervals are
+subdivided.  The target radial spacing is region dependent (fuel, core
+coolant, moderator, and reflector), while one target axial spacing is
+currently used throughout.
 
-\begin{itemize}
-  \item \textbf{Radial coupling:} face areas $r_{i\pm 1/2}\,\Delta z$ weighted
-        by harmonically averaged diffusion coefficients at the interface.
-  \item \textbf{Axial coupling:} face areas $r_i\,\Delta r$ weighted by
-        harmonically averaged axial diffusion coefficients.
-  \item \textbf{Diagonal loss:} cell volume $r_i\,\Delta r\,\Delta z$ times the
-        local removal cross section (absorption plus total outscatter).
-\end{itemize}
-
-Harmonic averaging preserves current continuity at material discontinuities
-and is the standard choice for cell-centered diffusion discretizations in
-heterogeneous media.
+Integrating the diffusion equation over cell $(i,j)$ gives a balance between
+currents through four faces and volumetric reaction terms.  Omitting the
+common factor $2\pi$, the cell volume is
+\[
+V_{ij}' =
+\frac{1}{2}\left(r_{i+1/2}^{2}-r_{i-1/2}^{2}\right)\Delta z_j .
+\]
+For two adjacent cells $P$ and $N$, the face conductance is
+\[
+H_{PN}
+=
+\left(
+\frac{\delta_P}{D_P}+\frac{\delta_N}{D_N}
+\right)^{-1},
+\]
+where $\delta_P$ and $\delta_N$ are the center-to-face distances.  This is the
+harmonic interface treatment implied by continuity of normal current.  After
+division by $V_{ij}'$, the off-diagonal coefficient is the negative face
+conductance multiplied by the cylindrical face area.  For example,
+\[
+C_{i+1/2,j}
+=
+\frac{r_{i+1/2}H_{i,i+1}}
+{\tfrac12(r_{i+1/2}^{2}-r_{i-1/2}^{2})},
+\]
+and the corresponding axial coefficient is
+$C_{i,j+1/2}=H_{j,j+1}/\Delta z_j$.  The diagonal contains the sum of all
+outgoing leakage coefficients plus $\Sigma_{r,g}$.
 
 The assembled per-group loss operator $A_g$ is a sparse CSR matrix with a
 five-point stencil in $(r,z)$.  It is factorized once per solve with a sparse
 direct solver (SuperLU via \texttt{scipy.sparse.linalg.factorized}).
+
+\subsubsection{Boundary conditions}
+
+At $r=0$, the missing west-face term imposes the cylindrical symmetry
+condition
+\[
+\left.\frac{\partial\phi_g}{\partial r}\right|_{r=0}=0 .
+\]
+At the outer radial, upper axial, and lower axial boundaries, the solver
+imposes zero scalar flux at the computational boundary using the half-cell
+distance from the last cell center to the boundary face.  The computational
+domain is extended beyond the physical reflector by
+\[
+d_{\mathrm{ext}} = 2.13\,\max_g D_{\mathrm{refl},g},
+\]
+radially and at each axial end, and the extension is assigned reflector
+properties.  Consequently the implemented condition is an approximate
+extrapolated-vacuum boundary:
+\[
+\phi_g=0
+\quad\text{at the extrapolated boundary.}
+\]
+The same extrapolation distance is used for every group because it is based on
+the maximum reflector diffusion coefficient.  This is a pragmatic closure,
+not a group-dependent transport boundary condition; its sensitivity should be
+separated from spatial-mesh and MGXS-condensation errors.
 
 \subsubsection{Eigenvalue iteration}
 
@@ -926,14 +1002,14 @@ The multigroup eigenvalue problem is solved by nested iteration:
                 + \sum_{g'\neq g} \Sigma_{s,g'\to g}\,\phi_{g'}$
                 for all groups.
         \end{enumerate}
-  \item \textbf{Inner scattering iteration.}  The coupled system is solved by
-        Gauss--Seidel sweeps over groups with a scheduled source tolerance
-        that tightens as the outer iteration progresses (from $10^{-2}$ in
-        early iterations down to the user-specified \texttt{inner\_tol}).
-  \item \textbf{Matrix-free GMRES acceleration.}  For strongly scattering
-        cases, the inner iteration is wrapped in a matrix-free GMRES solver
-        preconditioned by the same per-group SuperLU factors.  This
-        accelerates convergence without ever assembling a monolithic
+  \item \textbf{Inner scattering iteration.}  The coupled system first receives
+        at most five Gauss--Seidel sweeps over destination groups.  The
+        requested inner tolerance is scheduled from $10^{-2}$ in early outer
+        iterations to the user-specified \texttt{inner\_tol}.
+  \item \textbf{Matrix-free GMRES fallback.}  If those Gauss--Seidel sweeps do
+        not satisfy the active inner tolerance, the code solves the coupled
+        scattering system with matrix-free GMRES, preconditioned by the same
+        per-group SuperLU factors.  This avoids assembling a monolithic
         $(G \times N_{\mathrm{cells}}) \times (G \times N_{\mathrm{cells}})$
         matrix, which would produce prohibitive fill-in for higher group
         counts and fine meshes.
@@ -950,22 +1026,37 @@ The multigroup eigenvalue problem is solved by nested iteration:
         \[
         \sum_{i,j} V_{ij}\,\sum_g \nu\Sigma_{f,g,ij}\,\phi_{g,ij} = 1 .
         \]
-        This is a physically meaningful power normalization: the flux
-        magnitude directly scales with the reactor power level.
+        This fixes the otherwise arbitrary eigenvector scale and improves
+        numerical conditioning.  It is not an absolute power normalization;
+        conversion to physical flux or power requires a separate amplitude
+        based on reactor power and recoverable energy per fission.
 \end{enumerate}
 
-Convergence is declared when $|k_{\mathrm{new}} - k_{\mathrm{old}}| <
-\texttt{tol}$ and the volume-weighted balance residual falls below a
-threshold.
+Convergence is declared only after the final requested inner tolerance is
+active and both
+\[
+\frac{|k_{\mathrm{new}}-k_{\mathrm{old}}|}
+{|k_{\mathrm{new}}|}<\texttt{tol}
+\]
+and the volume-weighted change in fission-source shape is below
+\texttt{source\_tol}.  A volume-weighted equation-balance residual is computed
+after convergence and reported as a diagnostic, but it is not currently a
+stopping criterion.
 
 \subsubsection{Rod-worth scan}
 
 The equivalent-absorber rod model adds a scalar $\Delta\Sigma_a$ inside the
-physical rod radius when the rod is inserted.  A rod scan sweeps the
-insertion fraction $x \in [0, 1]$, solving the eigenvalue problem at each
-position.  The scan may warm-start each solve with the previous converged
-flux to reduce iteration counts.  The result is a reactivity curve
-$\Delta\rho(x)$ that can be stored for later use by the web application.
+physical rod radius above an axially moving rod tip.  In those cells it also
+sets $\nu\Sigma_f$, $\chi$, and scattering to zero.  This is an equivalent
+black/absorbing-region perturbation, not a material replacement using the
+parked-rod MGXS.  A rod scan sweeps the insertion fraction
+$x \in [0,1]$, rebuilding and factorizing the affected group operators at each
+position.  The previous converged flux may be used as the next initial guess.
+
+The resulting $\Delta\rho(x)$ is explicitly exploratory.  It is not a
+transport-calibrated rod-worth curve because there are no rodded MGXS, SPH
+factors, or discontinuity factors in the present workflow.  It should not be
+frozen into the web application without a separate validation study.
 
 \subsection{Persistent preparation cache}
 
@@ -973,7 +1064,7 @@ The full solve chain (adapter $\to$ mesh construction $\to$ per-group CSR
 assembly $\to$ convergence) is expensive, especially for higher group counts
 and fine meshes.  The cache module
 (\texttt{multigroup\_diffusion\_cache.py}) avoids recomputing this work on
-every notebook restart or backend request.
+every notebook restart or explicit cache preparation.
 
 The cache fingerprint is a SHA-256 hash of:
 \begin{itemize}
@@ -981,8 +1072,13 @@ The cache fingerprint is a SHA-256 hash of:
   \item the colocated \texttt{model.xml} contents,
   \item the mesh-spacing configuration (target $\Delta r$ and $\Delta z$ per
         region),
-  \item and the solver tolerances and algorithm version.
+  \item the rod-absorption parameter and solver tolerances,
+  \item and an explicit cache-schema version.
 \end{itemize}
+
+The fingerprint does not hash the Python source itself.  A numerical algorithm
+change that affects cached data therefore requires incrementing the cache
+schema version.
 
 On a cache hit, the following are loaded directly from disk:
 \begin{itemize}
@@ -995,8 +1091,11 @@ On a cache hit, the following are loaded directly from disk:
 
 SuperLU factorization objects are process-local and are not serialized; a
 process that needs to solve again (e.g.\ for a rod scan) loads the CSR
-matrices and re-factorizes them in memory.  On a cache miss, the full
-build-and-solve pipeline runs synchronously and the results are persisted.
+matrices and re-factorizes them in memory.  The persisted operators describe
+the clean state only.  A changed rod position alters the absorption and
+scattering maps, so its operators must still be rebuilt and factorized.  On a
+cache miss, the full clean-state build-and-solve pipeline runs synchronously
+and the results are persisted.
 
 The default cache root is \texttt{backend/.cache/openmc\_diffusion/}.  The
 CLI entry point \texttt{backend/openmc\_to\_diffusion.py} exposes a
@@ -1005,48 +1104,59 @@ CLI entry point \texttt{backend/openmc\_to\_diffusion.py} exposes a
 \subsection{Integration with the web application}
 
 The multigroup diffusion pipeline currently operates as an offline
-calibration tool.  The intended path to the web backend is:
+analysis and verification tool.  A defensible path to the web backend is:
 
 \begin{enumerate}
   \item run the MGXS export once per group structure of interest,
   \item prepare the diffusion cache from the chosen export,
-  \item extract the rod-worth curve $\Delta\rho(x)$ and the clean-core
-        eigenvalue $k_{\mathrm{clean}}$,
-  \item freeze those values into the backend calibration module, replacing
-        or augmenting the current one-group effective constants,
-  \item the web app then uses the multigroup-derived reactivity curve in its
-        point-kinetics transient and the multigroup flux shape for spatial
-        display.
+  \item establish clean-core mesh and group convergence against OpenMC
+        transport,
+  \item introduce and validate SPH/discontinuity corrections if the intended
+        accuracy requires them,
+  \item generate rodded MGXS or otherwise validate a rod-equivalence model,
+  \item only then expose qualified clean-core and rod-worth data to the
+        backend.
 \end{enumerate}
 
-Because the cache stores per-group CSR matrices, a future backend could
-also load a prepared cache and run rapid rod-position sweeps or
-adjoint-weighted kinetics parameter calculations without re-running the
-OpenMC transport step.
+The cache is still useful to a future backend because it can load a qualified
+clean solution and its CSR operators without re-running OpenMC.  It does not,
+by itself, make rod-position sweeps cheap because each rod state changes the
+operators.  Additional operator-reuse or low-rank-update work would be needed
+for that capability.
 
 \subsection{Current status and verification}
 
-The multigroup diffusion workflow is operational and verified across 1--70
-energy groups on the resolved concentric geometry.  The workflow document
-\texttt{theory/diffusion\_mgxs\_workflow.md} tracks per-group diffusion
-results against both OpenMC continuous-energy and multigroup transport
-reference $k_{\mathrm{eff}}$ values.  Key observations:
+The adapter and export configuration support the listed 1, 2, 4, 8, 16, 25,
+40, and 70 group structures.  The documented diffusion benchmark table
+currently contains resolved clean-core results through 16 groups; support for a
+group structure should not be confused with a completed mesh/runtime
+verification at that group count.  The workflow document
+\texttt{theory/diffusion\_mgxs\_workflow.md} records the current comparison:
 
 \begin{itemize}
-  \item OpenMC multigroup transport converges to within $\sim\pm 50$~pcm of
-        continuous-energy when both the geometry is resolved and P1/P3
-        scattering is used.
+  \item OpenMC multigroup transport with the validation-only P0 correction
+        approaches the continuous-energy reference as the group structure is
+        refined: the reported MG biases are $+806$, $+426$, $+166$, and
+        $+66$~pcm for 2, 4, 8, and 16 groups, respectively.
   \item The uncorrected diffusion bias (diffusion $k_{\mathrm{eff}}$ minus
         OpenMC MG $k_{\mathrm{eff}}$) stabilizes around $-400$ to $-500$~pcm
-        for 8--70 groups, consistent with the expected systematic error from
-        diffusion theory.
-  \item The one-group diffusion result carries a $\sim+1800$~pcm bias,
-        confirming that energy condensation and spatial homogenization are
-        the dominant error sources in the older model.
+        for the documented 4, 8, and 16 group cases.  This is evidence of a
+        repeatable residual bias, not proof that diffusion closure alone is
+        its cause.
+  \item The resolved two-group diffusion result is anomalous relative to that
+        trend: its bias is about $+1194$~pcm relative to two-group OpenMC MG.
+        This points to sensitivity to the very broad energy condensation and
+        groupwise diffusion coefficients rather than a simple monotonic
+        group-count convergence law.
+  \item The resolved one-group diffusion result carries an approximately
+        $+1800$~pcm bias relative to continuous energy.  Because the fuel rings
+        remain spatially resolved in this calculation, that result cannot be
+        attributed to collapsing the rings into one spatial region.
 \end{itemize}
 
-SPH factors, discontinuity factors, and rodded MGXS are deferred until the
-uncorrected diffusion baseline is stable and documented.
+The current acceptance criterion is trend and numerical sanity, not a tight
+pcm agreement target.  SPH factors, discontinuity factors, and rodded MGXS are
+deferred until the uncorrected clean-core baseline is stable and documented.
 
 \section{How the modeling layers relate}
 
@@ -1057,7 +1167,7 @@ Layer & Model & Purpose \\
 \midrule
 OpenMC MGXS export & Resolved-cell multigroup & Generate transport-derived group constants and scattering matrices from continuous-energy Monte Carlo \\
 \rule{0pt}{13pt}%
-Multigroup diffusion solver & $G$-group 2D finite-volume & Solve resolved-cell eigenvalue problem; produce rod-worth curve; anchor flux shape \\
+Multigroup diffusion solver & $G$-group 2D finite-volume & Solve the resolved-cell clean-core eigenvalue problem; provide flux shapes and an exploratory equivalent-rod scan \\
 Notebook estimate 1 & Homogeneous buckling & First-pass analytical check of scale and leakage trends \\
 Notebook estimate 2 / Core page & Steady 2D one-group diffusion & Compute $k_{\mathrm{eff}}$, flux maps, and rod-worth calibration from effective constants \\
 Overview page & 0D six-group point kinetics & Fast transient driven by the calibrated reactivity curve \\
@@ -1071,11 +1181,13 @@ The conceptual workflow is therefore:
   \item Run OpenMC with resolved-cell MGXS tallies; export constants as JSON,
   \item parse the export through the adapter and build a boundary-fitted
         finite-volume mesh,
-  \item solve the multigroup diffusion eigenvalue problem and scan the rod
-        worth (via \texttt{concentricModel.ipynb}),
-  \item freeze the resulting reactivity curve and clean-core constants into
-        the backend calibration module,
-  \item use the fast point model for dashboard-style operation on the
+  \item solve and verify the clean-core multigroup diffusion eigenvalue problem
+        (via \texttt{concentricModel.ipynb}),
+  \item treat the present equivalent-rod scan as exploratory until rodded data
+        and diffusion corrections are validated,
+  \item qualify any future constants or reactivity curves before transferring
+        them into the backend calibration module,
+  \item use the existing fast point model for dashboard-style operation on the
         Overview page,
   \item and use the diffusion transient (one-group or, in the future,
         multigroup) when spatial dynamics matter.
@@ -1093,10 +1205,11 @@ The one-group web-application models remain intentionally simplified:
         absorption constants rather than coupled moderator state equations.
 \end{itemize}
 
-The OpenMC-informed multigroup diffusion pipeline lifts the energy-group
-limitation (arbitrary CASMO group structures up to 70 groups are supported)
-and removes spatial homogenization by preserving every OpenMC cell as a
-separate diffusion region.  However, it does not yet include:
+The OpenMC-informed multigroup diffusion pipeline lifts the one-group
+limitation (the configured CASMO structures contain up to 70 groups) and
+avoids any additional cross-cell homogenization by preserving every exported
+OpenMC cell as a separate diffusion region.  It still uses flux-weighted
+cell-homogenized constants and does not yet include:
 \begin{itemize}
   \item SPH factors or discontinuity factors to correct the diffusion
         transport approximation,
@@ -1119,9 +1232,10 @@ increasing spatial and spectral fidelity:
         multigroup cross sections.
   \item A \textbf{resolved multigroup diffusion solver} consumes those MGXS
         exports, solves the $G$-group eigenvalue problem on a
-        boundary-fitted cylindrical mesh, and produces rod-worth curves
-        and flux shapes with substantially reduced energy-condensation
-        error relative to the one-group model.
+        boundary-fitted cylindrical mesh, and produces clean-core flux shapes
+        plus an exploratory equivalent-rod response.  Group refinement reduces
+        energy-condensation error in the MGXS representation, but the remaining
+        diffusion bias is not yet corrected by SPH or discontinuity factors.
   \item The older \textbf{one-group annular diffusion model} remains the
         calibration workbench for the interactive web app, providing
         effective constants and rod-worth data for the point-kinetics and
@@ -1134,7 +1248,8 @@ increasing spatial and spectral fidelity:
 
 The notebook \texttt{theory/concentricModel.ipynb} is the user-facing
 interface to the multigroup diffusion pipeline: select an MGXS export,
-prepare the cache, inspect the flux, and scan the rod worth.  The
+prepare the cache, inspect the clean-core flux, and optionally run the
+uncalibrated equivalent-rod scan.  The
 \texttt{diffusion\_mgxs\_workflow.md} document records the group-by-group
 verification results and the scattering contract that ties the export
 format to the solver expectations.
