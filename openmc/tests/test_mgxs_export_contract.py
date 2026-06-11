@@ -15,6 +15,20 @@ def _model() -> openmc.Model:
     return openmc.Model(geometry=geometry)
 
 
+def _bounded_fuel_model() -> openmc.Model:
+    material = openmc.Material()
+    material.add_nuclide("H1", 1.0)
+    cylinder = openmc.ZCylinder(r=10.0)
+    lower = openmc.ZPlane(z0=-20.0)
+    upper = openmc.ZPlane(z0=20.0)
+    cell = openmc.Cell(
+        name="fuel_ring_1",
+        fill=material,
+        region=-cylinder & +lower & -upper,
+    )
+    return openmc.Model(geometry=openmc.Geometry([cell]))
+
+
 class MGXSExportContractTests(unittest.TestCase):
     def test_canonical_and_validation_libraries_use_distinct_corrections(self):
         config = MGXSExportConfig(
@@ -61,6 +75,33 @@ class MGXSExportContractTests(unittest.TestCase):
         )
         with self.assertRaisesRegex(ValueError, "ignores P0 correction"):
             attach_mgxs_tallies(_model(), config)
+
+    def test_resolved_bounded_geometry_gets_cylindrical_power_tally(self):
+        config = MGXSExportConfig(
+            domain_definitions=(("core_fuel_ring_1", "fuel_ring_1"),),
+            reference_power_mesh_radial_bins=4,
+            reference_power_mesh_axial_bins=5,
+        )
+
+        attached = attach_mgxs_tallies(_bounded_fuel_model(), config)
+        power_tally = attached[8]
+        metadata = attached[-1]
+
+        self.assertIsNotNone(power_tally)
+        assert power_tally is not None
+        self.assertEqual(power_tally.scores, ["kappa-fission"])
+        self.assertEqual(power_tally.name, "reference-kappa-fission-mesh")
+        mesh = power_tally.filters[0].mesh
+        self.assertIsInstance(mesh, openmc.CylindricalMesh)
+        self.assertEqual(mesh.dimension, (4, 1, 5))
+        self.assertEqual(
+            metadata["auxiliary_tallies"]["power_mesh"]["radial_bins"],
+            4,
+        )
+        self.assertEqual(
+            metadata["auxiliary_tallies"]["power_mesh"]["axial_bins"],
+            5,
+        )
 
 
 if __name__ == "__main__":

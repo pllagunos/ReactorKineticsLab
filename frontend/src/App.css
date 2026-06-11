@@ -610,6 +610,102 @@ input[type='range'] {
   color: var(--text-strong);
 }
 
+/* ── Resolved multigroup diffusion page ─────────────────── */
+
+.multigroup-control-bar {
+  padding: 1rem 1.25rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.multigroup-control-bar__detail {
+  display: block;
+  margin-top: 0.4rem;
+  color: var(--text-muted);
+  font-size: 0.88rem;
+}
+
+.multigroup-map-grid,
+.multigroup-profile-grid {
+  display: grid;
+  gap: 1.5rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.multigroup-map-card,
+.multigroup-profile-card {
+  padding: 1.25rem;
+}
+
+.multigroup-map-card h2,
+.multigroup-profile-card h3 {
+  margin: 0 0 1rem;
+}
+
+.multigroup-map {
+  width: 100%;
+  display: block;
+  border-radius: 0.65rem;
+  overflow: hidden;
+}
+
+.multigroup-scale {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  margin-top: 0.7rem;
+  color: var(--text-dim);
+  font-size: 0.8rem;
+}
+
+.multigroup-scale__bar {
+  height: 8px;
+  flex: 1;
+  border-radius: 999px;
+  background: linear-gradient(90deg, hsl(205 82% 15%), hsl(170 82% 73%));
+}
+
+.multigroup-scale--power .multigroup-scale__bar {
+  background: linear-gradient(90deg, hsl(36 82% 15%), hsl(12 82% 73%));
+}
+
+.multigroup-details {
+  padding: 1.25rem;
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.multigroup-details div {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.multigroup-details span {
+  color: var(--text-dim);
+  font-size: 0.82rem;
+}
+
+.multigroup-details strong {
+  color: var(--text-strong);
+  font-size: 1.15rem;
+}
+
+@media (max-width: 900px) {
+  .multigroup-map-grid,
+  .multigroup-profile-grid,
+  .multigroup-details {
+    grid-template-columns: 1fr;
+  }
+
+  .multigroup-control-bar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}
+
 .flux-skeleton {
   width: 100%;
   height: 300px;

@@ -110,6 +110,10 @@ Key backend files:
   - point-kinetics engine
 - `backend/reactor_backend/service.py`
   - stateful simulation service, history, and timing
+- `backend/reactor_backend/multigroup_service.py`
+  - cached four-group clean-core diffusion service
+- `backend/reactor_backend/multigroup_sph.py`
+  - CE-referenced SPH fitting, application, and qualification
 - `backend/reactor_backend/app.py`
   - FastAPI routes
 
@@ -123,6 +127,14 @@ The current backend exposes:
 - `POST /api/simulation/rod-insertion`
 - `POST /api/simulation/running`
 - `POST /api/simulation/scram`
+- `GET /api/multigroup-diffusion/state`
+- `POST /api/multigroup-diffusion/recompute`
+
+The multigroup page is clean-core only. It loads the persisted four-group
+solution immediately and solves again only on explicit recompute. Its export,
+factor, and cache locations can be overridden with
+`MULTIGROUP_MGXS_EXPORT_DIR`, `MULTIGROUP_SPH_FACTORS_PATH`, and
+`MULTIGROUP_DIFFUSION_CACHE_DIR`.
 
 The frontend treats the backend as the **source of truth** for:
 
@@ -238,13 +250,21 @@ This is still an educational first slice. Intentional simplifications:
 Now that the physics layer is in Python, natural next steps are:
 
 - once PK model of core is ready, replace backend core with openmc concentric core
-- get 2/4 group diffusion with SPH and use that in diffusion page
+- regenerate the four-group CE reference at <=15 pcm uncertainty and qualify
+  the implemented SPH workflow
 - see `theory/ThermalHydraulics.tex` adjust to new core size
 - adjust modelica model
 - FMU build handlded outside of python and frozen (not gitignored)? or handled by a script, like with bun run backend:install? this way simulator can run on macos (if doable)
 - future: krylov instead of gauss-seidel
 
+### frontend
+- view should be based on laptop screen 16:10
+- no scrolling should be needed at 100% zoom to visualize controls and graphs
+- less cards explaining stuff that's in the README.
+- does transient diffusion solver make sense?
+
 # architecture documentation:
+- Decide documentation structure (latex file for reactor modeling, TH and MD files for software arch?)
 
 ###
 for openmc scripts, explaining architecture and functionality of fuel_element.py, involutes.py, ploting.py and reactor_geometry.py. Specially how its object oriented nature and dataclasses interact between each other. But also how they implement what they do (with special emphasis in how the involute plates are generated as polygons from sin,cos curves and transformations). Include also how the frm2_nat.ipynb notebook uses them.
@@ -267,4 +287,3 @@ Failure containment / fallback model
 In thermal_adapter.py:218, _activate_fallback() switches to a simple surrogate thermal model if FMU init or stepping fails.
 In thermal_adapter.py:246, _advance_fallback() advances that surrogate with a first-order temperature response.
 In thermal_adapter.py:382, _unavailable_snapshot() packages an error state for the API.
-

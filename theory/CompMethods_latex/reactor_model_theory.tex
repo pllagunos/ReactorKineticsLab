@@ -769,17 +769,24 @@ modules rather than notebook-only logic:
         (\texttt{backend/reactor\_backend/multigroup\_diffusion.py}):
         assemble per-group sparse spatial operators, solve the multigroup
         eigenvalue problem, and optionally scan rod insertion.
+  \item \textbf{CE-referenced SPH qualification}
+        (\texttt{backend/reactor\_backend/multigroup\_sph.py}):
+        normalize the OpenMC and diffusion region-integrated fluxes to equal
+        fission production, fit one factor per resolved region and energy
+        group, apply the factors consistently to transport and reaction terms,
+        and evaluate eigenvalue, flux, and power-shape acceptance criteria.
   \item \textbf{Persistent preparation cache}
         (\texttt{backend/reactor\_backend/multigroup\_diffusion\_cache.py}):
-        fingerprint the MGXS data, mesh settings, and solver configuration;
-        build CSR matrices and a clean-core solution once, then persist
-        everything to disk for fast reload.
+        fingerprint the MGXS data, mesh settings, SPH artifact, and solver
+        configuration; build corrected CSR matrices and a clean-core solution
+        once, then persist everything to disk for fast reload.
 \end{enumerate}
 
-The user-facing entry point is the notebook
-\texttt{theory/concentricModel.ipynb}, which selects an export directory,
-configures mesh spacing and solver tolerances, triggers cache preparation, and
-plots the resulting flux and rod-worth scan.
+The command-line entry point is
+\texttt{backend/openmc\_to\_diffusion.py}.  The notebook
+\texttt{theory/concentricModel.ipynb} remains an analysis interface, while the
+web application exposes a four-group clean-core page backed by the same
+adapter, factor artifact, operators, and persistent solution.
 
 \subsection{MGXS export from OpenMC}
 
@@ -837,10 +844,18 @@ solver.
 Each export run produces:
 \begin{itemize}
   \item \texttt{mgxs\_constants.json} --- nested group constants, delayed-neutron
-        data, and metadata for every domain;
+        data, metadata for every domain, raw region/group CE flux tally means
+        and standard deviations, and a cylindrical CE
+        \texttt{kappa-fission} power-mesh tally;
   \item \texttt{group\_constants.csv} --- flat table of all group-constant rows;
   \item \texttt{delayed\_neutrons.csv} --- flat table of all delayed-neutron rows.
 \end{itemize}
+
+The raw CE flux tally is retained in fast-to-thermal group order without the
+independent groupwise normalization used by the GeN-Foam auxiliary export.
+This distinction is necessary because SPH requires relative region/group
+reaction rates from one common Monte Carlo normalization.  The cylindrical
+power tally supplies independent normalized radial and axial shape checks.
 
 The notebook \texttt{openmc/exportMGXS.ipynb} runs group-count and
 Legendre-order sweeps, storing each result under
@@ -883,8 +898,10 @@ OpenMC export and the diffusion solver.  It performs five operations:
 
 The output is a \texttt{CylindricalLayeredModel2D} containing one
 \texttt{MultiGroupRegion} per OpenMC cell.  Each region holds per-group
-vectors for $D$, $\Sigma_a$, $\nu\Sigma_f$, $\chi$, and a $G\times G$ P0
-scattering matrix $\Sigma_{s,g'\to g}$.  The radial mesh is fitted exactly
+vectors for $D$, $\Sigma_a$, $\nu\Sigma_f$, $\kappa\Sigma_f$, $\chi$, and a
+$G\times G$ P0 scattering matrix $\Sigma_{s,g'\to g}$.  The adapter also
+loads the optional raw CE region/group flux and power-mesh reference.  The
+radial mesh is fitted exactly
 to all XML-derived material boundaries so no interface is lost to grid
 coarsening.  ``Resolved'' here means that no new cross-cell homogenization is
 introduced: each exported cell receives its own constants.  The constants are
@@ -959,6 +976,33 @@ outgoing leakage coefficients plus $\Sigma_{r,g}$.
 The assembled per-group loss operator $A_g$ is a sparse CSR matrix with a
 five-point stencil in $(r,z)$.  It is factorized once per solve with a sparse
 direct solver (SuperLU via \texttt{scipy.sparse.linalg.factorized}).
+
+\subsubsection{Production-mesh qualification}
+
+SPH constants are tied to a particular spatial homogenization and mesh, so the
+mesh is selected before fitting factors.  The current 4-group study compared
+the reference spacing
+\[
+(\Delta r_{\mathrm{fuel}},\Delta r_{\mathrm{cool}},
+ \Delta r_{\mathrm{mod}},\Delta r_{\mathrm{refl}},\Delta z)
+=(0.1,1,5,10,10)\ {\rm cm}
+\]
+with the candidate
+\[
+(0.5,1,5,10,20)\ {\rm cm}.
+\]
+Both meshes preserve every material face exactly.  The reference contains
+15\,096 cells and solved in 1.75~s in the recorded run; the candidate contains
+6\,360 cells and solved in 0.42~s.  Although the eigenvalue changed by only
+$+5.52$~pcm, the candidate failed the field criteria: its maximum resolved
+region/group flux error was 35.3\% in the parked-control-rod region, and its
+radial and axial power-shape RMS errors were 4.30\% and 3.07\%.  The required
+limits were 0.5\% and 1\%, respectively.  Therefore the 15\,096-cell mesh is
+retained for the first production factor set.
+
+Power profiles are compared as power per unit radial or axial coordinate
+rather than raw power per mesh bin.  Otherwise changing the bin width would
+appear as a physical shape change.
 
 \subsubsection{Boundary conditions}
 
@@ -1043,6 +1087,63 @@ and the volume-weighted change in fission-source shape is below
 after convergence and reported as a diagnostic, but it is not currently a
 stopping criterion.
 
+\subsection{CE-referenced superhomogenization}
+
+The SPH implementation uses one positive factor $\mu_{i,g}$ for each resolved
+OpenMC region $i$ and energy group $g$.  Raw CE and diffusion
+region-integrated scalar fluxes are first normalized so that both have unit
+total fission production:
+\[
+\sum_{i,g}\nu\Sigma_{f,i,g}\Phi_{i,g}=1.
+\]
+For the current iterate, the direct fixed-point target is
+\[
+\mu_{i,g}^{*}
+=
+\frac{\Phi_{i,g}^{\mathrm{CE}}}
+     {\Phi_{i,g}^{\mathrm{diff}}}.
+\]
+The code damps this target in logarithmic space,
+\[
+\ln\mu_{i,g}^{(n+1)}
+=(1-\alpha)\ln\mu_{i,g}^{(n)}
++ \alpha\ln\mu_{i,g}^{*},
+\qquad \alpha=0.5 ,
+\]
+which preserves positivity and avoids an asymmetric additive update.
+
+For each source group, the factor multiplies absorption, fission,
+\texttt{kappa-fission}, and the complete scattering row:
+\[
+\widetilde{\Sigma}_{a,i,g}=\mu_{i,g}\Sigma_{a,i,g},\qquad
+\widetilde{\nu\Sigma}_{f,i,g}=\mu_{i,g}\nu\Sigma_{f,i,g},
+\]
+\[
+\widetilde{\Sigma}_{s,i,g\rightarrow g'}
+=\mu_{i,g}\Sigma_{s,i,g\rightarrow g'} .
+\]
+The transport term is transformed by the same factor.  Since the solver stores
+$D=1/(3\Sigma_{\mathrm{tr}})$, this becomes
+\[
+\widetilde{D}_{i,g}=\frac{D_{i,g}}{\mu_{i,g}} .
+\]
+The fission spectrum $\chi$ is unchanged.  Thus the fitting objective is flux
+and reaction-rate equivalence, not direct adjustment of $k_{\mathrm{eff}}$.
+
+Only statistically active bins enter convergence and qualification.  The fit
+requires active transformed flux errors below 0.2\% and an eigenvalue change
+below 5~pcm for two successive iterations; bounded factors and an iteration
+limit make failure explicit.  The immutable \texttt{SphFactorSet} records the
+factor matrix, active mask, convergence history, mesh, source fingerprint,
+algorithm version, and provisional state.  A factor artifact is rejected when
+the MGXS JSON, XML geometry, mesh, or algorithm version changes.
+
+Final qualification additionally requires a CE eigenvalue uncertainty no
+larger than 15~pcm, corrected $k_{\mathrm{eff}}$ within 50~pcm of the CE mean,
+all statistically active region/group fluxes within 1\%, and normalized radial
+and axial power profiles within 2\% RMS and 5\% maximum pointwise error.
+Repeated corrected solves must agree within 1~pcm.
+
 \subsubsection{Rod-worth scan}
 
 The equivalent-absorber rod model adds a scalar $\Delta\Sigma_a$ inside the
@@ -1054,9 +1155,11 @@ $x \in [0,1]$, rebuilding and factorizing the affected group operators at each
 position.  The previous converged flux may be used as the next initial guess.
 
 The resulting $\Delta\rho(x)$ is explicitly exploratory.  It is not a
-transport-calibrated rod-worth curve because there are no rodded MGXS, SPH
-factors, or discontinuity factors in the present workflow.  It should not be
-frozen into the web application without a separate validation study.
+transport-calibrated rod-worth curve because there are no rodded MGXS,
+rod-dependent SPH factors, or discontinuity factors in the present workflow.
+Clean-core SPH factors, when available, do not qualify this rod perturbation.
+It should not be frozen into the web application without a separate
+validation study.
 
 \subsection{Persistent preparation cache}
 
@@ -1072,6 +1175,8 @@ The cache fingerprint is a SHA-256 hash of:
   \item the colocated \texttt{model.xml} contents,
   \item the mesh-spacing configuration (target $\Delta r$ and $\Delta z$ per
         region),
+  \item the complete SPH factor artifact, including its algorithm version,
+        when corrections are applied,
   \item the rod-absorption parameter and solver tolerances,
   \item and an explicit cache-schema version.
 \end{itemize}
@@ -1083,10 +1188,10 @@ schema version.
 On a cache hit, the following are loaded directly from disk:
 \begin{itemize}
   \item radial and axial mesh edge arrays,
-  \item cell-wise material arrays ($D$, $\Sigma_a$, $\nu\Sigma_f$, $\chi$,
-        and P0 scattering),
+  \item cell-wise material arrays ($D$, $\Sigma_a$, $\nu\Sigma_f$,
+        $\kappa\Sigma_f$, $\chi$, P0 scattering, and resolved-region indices),
   \item one CSR spatial matrix per energy group,
-  \item and the converged clean-core eigenvalue and flux field.
+  \item and the converged clean-core eigenvalue, flux field, and power density.
 \end{itemize}
 
 SuperLU factorization objects are process-local and are not serialized; a
@@ -1099,30 +1204,23 @@ and the results are persisted.
 
 The default cache root is \texttt{backend/.cache/openmc\_diffusion/}.  The
 CLI entry point \texttt{backend/openmc\_to\_diffusion.py} exposes a
-\texttt{--prepare-cache} flag for use outside the notebook.
+\texttt{--qualify-mesh} study, \texttt{--fit-sph} factor generation, and
+\texttt{--prepare-cache} operator preparation for use outside the notebook.
 
 \subsection{Integration with the web application}
 
-The multigroup diffusion pipeline currently operates as an offline
-analysis and verification tool.  A defensible path to the web backend is:
+The web backend now exposes the four-group clean-core model through
+\texttt{GET /api/multigroup-diffusion/state} and
+\texttt{POST /api/multigroup-diffusion/recompute}.  The service is initialized
+lazily.  It loads the persisted clean solution immediately, together with
+matching SPH factors and corrected CSR operators when a valid artifact is
+installed.  A fresh solve runs only after an explicit recompute request.
 
-\begin{enumerate}
-  \item run the MGXS export once per group structure of interest,
-  \item prepare the diffusion cache from the chosen export,
-  \item establish clean-core mesh and group convergence against OpenMC
-        transport,
-  \item introduce and validate SPH/discontinuity corrections if the intended
-        accuracy requires them,
-  \item generate rodded MGXS or otherwise validate a rod-equivalence model,
-  \item only then expose qualified clean-core and rod-worth data to the
-        backend.
-\end{enumerate}
-
-The cache is still useful to a future backend because it can load a qualified
-clean solution and its CSR operators without re-running OpenMC.  It does not,
-by itself, make rod-position sweeps cheap because each rod state changes the
-operators.  Additional operator-reuse or low-rank-update work would be needed
-for that capability.
+If no valid factor artifact is present, the endpoint still exposes the
+uncorrected calculation but marks it provisional and unqualified.  The page
+does not accept rod position and does not expose the exploratory equivalent-rod
+model.  Immediate rod/reactivity response remains the responsibility of point
+kinetics until rodded MGXS and rod-dependent diffusion corrections exist.
 
 \subsection{Current status and verification}
 
@@ -1154,9 +1252,15 @@ verification at that group count.  The workflow document
         attributed to collapsing the rings into one spatial region.
 \end{itemize}
 
-The current acceptance criterion is trend and numerical sanity, not a tight
-pcm agreement target.  SPH factors, discontinuity factors, and rodded MGXS are
-deferred until the uncorrected clean-core baseline is stable and documented.
+The SPH fitting, application, fingerprinting, cache, and qualification
+machinery are implemented and unit tested.  The presently stored four-group
+export cannot yet produce a qualified factor set because it predates the raw
+CE region/group flux and power-mesh payload.  Its CE eigenvalue standard
+deviation is 59.34~pcm, while final qualification requires at most 15~pcm.
+Therefore the online four-group result remains explicitly provisional until a
+new high-statistics CE export is generated and the factor fit passes all flux,
+power-shape, repeatability, and 50~pcm eigenvalue criteria.  Discontinuity
+factors and all rodded corrections remain deferred.
 
 \section{How the modeling layers relate}
 
@@ -1167,7 +1271,7 @@ Layer & Model & Purpose \\
 \midrule
 OpenMC MGXS export & Resolved-cell multigroup & Generate transport-derived group constants and scattering matrices from continuous-energy Monte Carlo \\
 \rule{0pt}{13pt}%
-Multigroup diffusion solver & $G$-group 2D finite-volume & Solve the resolved-cell clean-core eigenvalue problem; provide flux shapes and an exploratory equivalent-rod scan \\
+Multigroup diffusion solver & $G$-group 2D finite-volume with optional SPH & Solve and qualify the resolved-cell clean-core eigenvalue and flux/power shapes; retain the rod scan as offline exploration only \\
 Notebook estimate 1 & Homogeneous buckling & First-pass analytical check of scale and leakage trends \\
 Notebook estimate 2 / Core page & Steady 2D one-group diffusion & Compute $k_{\mathrm{eff}}$, flux maps, and rod-worth calibration from effective constants \\
 Overview page & 0D six-group point kinetics & Fast transient driven by the calibrated reactivity curve \\
@@ -1181,8 +1285,10 @@ The conceptual workflow is therefore:
   \item Run OpenMC with resolved-cell MGXS tallies; export constants as JSON,
   \item parse the export through the adapter and build a boundary-fitted
         finite-volume mesh,
+  \item qualify the production mesh, fit CE-referenced SPH factors, and
+        persist corrected operators,
   \item solve and verify the clean-core multigroup diffusion eigenvalue problem
-        (via \texttt{concentricModel.ipynb}),
+        through the CLI, notebook, or clean-core web page,
   \item treat the present equivalent-rod scan as exploratory until rodded data
         and diffusion corrections are validated,
   \item qualify any future constants or reactivity curves before transferring
@@ -1211,9 +1317,10 @@ avoids any additional cross-cell homogenization by preserving every exported
 OpenMC cell as a separate diffusion region.  It still uses flux-weighted
 cell-homogenized constants and does not yet include:
 \begin{itemize}
-  \item SPH factors or discontinuity factors to correct the diffusion
-        transport approximation,
-  \item rodded MGXS (the rod scan still uses an equivalent absorber),
+  \item a qualified high-statistics clean-core SPH factor artifact (the
+        fitting and application machinery is implemented),
+  \item discontinuity factors,
+  \item rodded MGXS or rod-dependent SPH factors,
   \item thermal-hydraulic or burnup feedback,
   \item time-dependent multigroup solves in the web backend.
 \end{itemize}
@@ -1232,10 +1339,10 @@ increasing spatial and spectral fidelity:
         multigroup cross sections.
   \item A \textbf{resolved multigroup diffusion solver} consumes those MGXS
         exports, solves the $G$-group eigenvalue problem on a
-        boundary-fitted cylindrical mesh, and produces clean-core flux shapes
-        plus an exploratory equivalent-rod response.  Group refinement reduces
-        energy-condensation error in the MGXS representation, but the remaining
-        diffusion bias is not yet corrected by SPH or discontinuity factors.
+        boundary-fitted cylindrical mesh, applies a persisted CE-referenced SPH
+        factor set when available, and produces clean-core flux and power
+        shapes.  The current stored export has not yet met the statistical and
+        field-shape requirements for a qualified factor set.
   \item The older \textbf{one-group annular diffusion model} remains the
         calibration workbench for the interactive web app, providing
         effective constants and rod-worth data for the point-kinetics and
@@ -1246,13 +1353,13 @@ increasing spatial and spectral fidelity:
         page captures evolving spatial flux shapes during rod motion.
 \end{itemize}
 
-The notebook \texttt{theory/concentricModel.ipynb} is the user-facing
-interface to the multigroup diffusion pipeline: select an MGXS export,
-prepare the cache, inspect the clean-core flux, and optionally run the
-uncalibrated equivalent-rod scan.  The
+The CLI \texttt{backend/openmc\_to\_diffusion.py}, the notebook
+\texttt{theory/concentricModel.ipynb}, and the four-group clean-core web page
+are user-facing interfaces to the same multigroup pipeline.  The notebook
+retains the uncalibrated equivalent-rod scan for offline exploration.  The
 \texttt{diffusion\_mgxs\_workflow.md} document records the group-by-group
-verification results and the scattering contract that ties the export
-format to the solver expectations.
+verification results, mesh study, SPH equations, and scattering contract that
+tie the export format to the solver expectations.
 
 That is the current modeling hierarchy of the project.
 

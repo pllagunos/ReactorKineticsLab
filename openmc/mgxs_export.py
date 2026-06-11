@@ -70,6 +70,8 @@ class MGXSExportConfig:
     scatter_correction: str | None = None
     validation_scatter_correction: str | None = "P0"
     kinetics_group_count: int = 1
+    reference_power_mesh_radial_bins: int = 100
+    reference_power_mesh_axial_bins: int = 100
 
 
 def legendre_order_for_moment(moment: str | int) -> int:
@@ -420,6 +422,7 @@ def attach_mgxs_tallies(
     dict[str, openmc.Tally],
     openmc.Tally,
     openmc.Tally,
+    openmc.Tally | None,
     dict[str, openmc.Cell],
     dict[str, Any],
 ]:
@@ -544,8 +547,53 @@ def attach_mgxs_tallies(
     prompt_generation_time_tally.scores = ["inverse-velocity"]
     tallies.append(prompt_generation_time_tally, merge=False)
 
+    if (
+        config.reference_power_mesh_radial_bins < 1
+        or config.reference_power_mesh_axial_bins < 1
+    ):
+        raise ValueError("Reference power mesh bin counts must be positive")
+    fuel_cells = [
+        domain
+        for label, domain in domains.items()
+        if label.startswith("core_fuel_ring_")
+    ]
+    power_domains = fuel_cells or list(domains.values())
+    lower_bounds = np.vstack(
+        [np.asarray(cell.bounding_box.lower_left, dtype=float) for cell in power_domains]
+    )
+    upper_bounds = np.vstack(
+        [np.asarray(cell.bounding_box.upper_right, dtype=float) for cell in power_domains]
+    )
+    lower = np.min(lower_bounds, axis=0)
+    upper = np.max(upper_bounds, axis=0)
+    power_mesh_tally = None
+    if np.all(np.isfinite(lower)) and np.all(np.isfinite(upper)):
+        radial_extent = float(
+            np.max(np.abs([lower[0], lower[1], upper[0], upper[1]]))
+        )
+        if radial_extent > 0.0 and upper[2] > lower[2]:
+            power_mesh = openmc.CylindricalMesh(
+                r_grid=np.linspace(
+                    0.0,
+                    radial_extent,
+                    config.reference_power_mesh_radial_bins + 1,
+                ),
+                z_grid=np.linspace(
+                    float(lower[2]),
+                    float(upper[2]),
+                    config.reference_power_mesh_axial_bins + 1,
+                ),
+                name="reference-kappa-fission-mesh",
+            )
+            power_mesh_tally = openmc.Tally(
+                name="reference-kappa-fission-mesh"
+            )
+            power_mesh_tally.filters = [openmc.MeshFilter(power_mesh)]
+            power_mesh_tally.scores = ["kappa-fission"]
+            tallies.append(power_mesh_tally, merge=False)
+
     model.tallies = tallies
-    return library, validation_library, beta_by_domain, decay_rate_by_domain, chi_delayed_by_domain, integral_flux_by_domain, master_flux_tally, prompt_generation_time_tally, domains, {
+    return library, validation_library, beta_by_domain, decay_rate_by_domain, chi_delayed_by_domain, integral_flux_by_domain, master_flux_tally, prompt_generation_time_tally, power_mesh_tally, domains, {
         "domains": {
             label: {
                 "domain_id": domain.id,
@@ -568,6 +616,15 @@ def attach_mgxs_tallies(
             "integral_flux_domains": len(integral_flux_by_domain),
             "master_flux": master_flux_tally.name,
             "prompt_generation_time": prompt_generation_time_tally.name,
+            "power_mesh": (
+                None
+                if power_mesh_tally is None
+                else {
+                    "name": power_mesh_tally.name,
+                    "radial_bins": config.reference_power_mesh_radial_bins,
+                    "axial_bins": config.reference_power_mesh_axial_bins,
+                }
+            ),
         },
     }
 
@@ -719,6 +776,7 @@ def load_mgxs_results(
     integral_flux_by_domain: dict[str, openmc.Tally],
     master_flux_tally: openmc.Tally,
     prompt_generation_time_tally: openmc.Tally,
+    power_mesh_tally: openmc.Tally | None,
     domains: dict[str, openmc.Cell],
     config: MGXSExportConfig,
     model_metadata: dict[str, Any] | None = None,
@@ -739,6 +797,10 @@ def load_mgxs_results(
             statepoint.get_tally(name=master_flux_tally.name).mean,
             dtype=float,
         ).reshape(-1)
+        master_flux_std = np.asarray(
+            statepoint.get_tally(name=master_flux_tally.name).std_dev,
+            dtype=float,
+        ).reshape(-1)
         prompt_generation_time_mean = np.asarray(
             statepoint.get_tally(name=prompt_generation_time_tally.name).mean,
             dtype=float,
@@ -746,6 +808,50 @@ def load_mgxs_results(
         prompt_generation_time_s = (
             float(prompt_generation_time_mean[0]) if prompt_generation_time_mean.size else None
         )
+        power_reference = None
+        if power_mesh_tally is not None:
+            loaded_power_tally = statepoint.get_tally(name=power_mesh_tally.name)
+            power_mean = np.squeeze(
+                loaded_power_tally.get_reshaped_data(
+                    value="mean",
+                    expand_dims=True,
+                )
+            )
+            power_std = np.squeeze(
+                loaded_power_tally.get_reshaped_data(
+                    value="std_dev",
+                    expand_dims=True,
+                )
+            )
+            mesh_filter = next(
+                tally_filter
+                for tally_filter in loaded_power_tally.filters
+                if isinstance(tally_filter, openmc.MeshFilter)
+            )
+            power_mesh = mesh_filter.mesh
+            expected_power_shape = (
+                len(power_mesh.r_grid) - 1,
+                len(power_mesh.z_grid) - 1,
+            )
+            if power_mean.shape != expected_power_shape:
+                raise ValueError(
+                    "Reference power tally has shape "
+                    f"{power_mean.shape}, expected {expected_power_shape}"
+                )
+            power_reference = {
+                "score": "kappa-fission",
+                "coordinate_system": "cylindrical-r-z",
+                "r_edges_cm": np.asarray(
+                    power_mesh.r_grid,
+                    dtype=float,
+                ).tolist(),
+                "z_edges_cm": np.asarray(
+                    power_mesh.z_grid,
+                    dtype=float,
+                ).tolist(),
+                "mean": np.asarray(power_mean, dtype=float).tolist(),
+                "std_dev": np.asarray(power_std, dtype=float).tolist(),
+            }
         master_decay_mean = _vectorise_delayed_xs(
             decay_rate_by_domain["__master__"].get_xs(value="mean", delayed_groups="all")
         )
@@ -859,6 +965,23 @@ def load_mgxs_results(
                 "delayed_neutron_rows": delayed_rows,
             }
 
+        reference_region_flux = {
+            label: {
+                "mean": np.asarray(
+                    statepoint.get_tally(
+                        name=integral_flux_by_domain[label].name
+                    ).mean,
+                    dtype=float,
+                ).reshape(-1)[::-1].tolist(),
+                "std_dev": np.asarray(
+                    statepoint.get_tally(
+                        name=integral_flux_by_domain[label].name
+                    ).std_dev,
+                    dtype=float,
+                ).reshape(-1)[::-1].tolist(),
+            }
+            for label in domains
+        }
         results = {
             "statepoint_path": str(statepoint_path),
             "cross_sections": cross_sections_path(),
@@ -872,6 +995,19 @@ def load_mgxs_results(
                 "k_generation_by_generation": _serialise_array(getattr(statepoint, "k_generation", [])),
             },
             "domains": domain_results,
+            "reference": {
+                "energy_order": "fast-to-thermal",
+                "normalization": (
+                    "raw OpenMC tally mean per source particle; no independent "
+                    "per-group spatial normalization"
+                ),
+                "region_flux": reference_region_flux,
+                "master_flux": {
+                    "mean": master_flux_mean[::-1].tolist(),
+                    "std_dev": master_flux_std[::-1].tolist(),
+                },
+                "power_mesh": power_reference,
+            },
             "group_constant_rows": all_group_constant_rows,
             "delayed_neutron_rows": all_delayed_rows,
         }
@@ -948,6 +1084,7 @@ def run_mgxs_export(
         integral_flux_by_domain,
         master_flux_tally,
         prompt_generation_time_tally,
+        power_mesh_tally,
         domains,
         tally_metadata,
     ) = attach_mgxs_tallies(model, config)
@@ -973,6 +1110,7 @@ def run_mgxs_export(
         integral_flux_by_domain=integral_flux_by_domain,
         master_flux_tally=master_flux_tally,
         prompt_generation_time_tally=prompt_generation_time_tally,
+        power_mesh_tally=power_mesh_tally,
         domains=domains,
         config=config,
         model_metadata=model_metadata,
@@ -1019,6 +1157,7 @@ def run_openmc_mg_validation(
         integral_flux_by_domain,
         master_flux_tally,
         prompt_generation_time_tally,
+        power_mesh_tally,
         domains,
         tally_metadata,
     ) = attach_mgxs_tallies(model, config)

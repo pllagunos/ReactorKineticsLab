@@ -6,17 +6,18 @@ The concentric diffusion model uses resolved OpenMC cell-wise multigroup
 constants. It does not homogenize the fuel rings into one core material and it
 does not solve higher-order transport equations.
 
-The production workflow has four distinct stages:
+The production workflow has five distinct stages:
 
 1. OpenMC continuous-energy calculation and MGXS tallying.
 2. OpenMC multigroup transport validation.
 3. Conversion of the canonical MGXS export into diffusion regions and a
    boundary-fitted finite-volume mesh.
-4. Group-wise diffusion solution and optional persistence of the prepared
-   matrices and clean-core result.
+4. CE-referenced SPH fitting on a fixed, qualified diffusion mesh.
+5. Group-wise diffusion solution and persistence of the factors, prepared
+   matrices, and clean-core result.
 
-SPH factors, discontinuity factors, and rodded MGXS are intentionally deferred
-until the clean unrodded diffusion calculation is stable and verified.
+The first online model is four-group and clean-core only. Discontinuity
+factors, rodded MGXS, and rod-dependent SPH remain out of scope.
 
 ## Scattering Contract
 
@@ -75,6 +76,25 @@ Within each interval, the default target spacings are:
 The default axial target spacing is 10 cm. All values are user-overridable.
 Subdividing an interval never moves a material boundary.
 
+## Mesh Qualification
+
+SPH factors are mesh dependent, so the production mesh is selected before
+fitting. The tested meshes were:
+
+| Mesh | Fuel/coolant/moderator/reflector radial targets | Axial target | Cells | Runtime |
+| --- | --- | ---: | ---: | ---: |
+| Reference | 0.1/1/5/10 cm | 10 cm | 15,096 | 1.75 s |
+| Candidate | 0.5/1/5/10 cm | 20 cm | 6,360 | 0.42 s |
+
+The candidate changed `k_eff` by only +5.52 pcm, but it failed the field
+criteria: the maximum resolved region/group flux error was 35.3% in the
+parked-control-rod region, and radial/axial power-shape RMS errors were 4.30%
+and 3.07%. The required limits are 0.5% flux and 1% RMS power shape.
+Consequently the 15,096-cell reference mesh remains the production mesh.
+
+Power profiles are compared as line-power density, not raw per-bin power, so
+different bin widths do not enter the error metric as a false shape change.
+
 ## Group-Wise Diffusion Solve
 
 For each energy group, the solver assembles one sparse spatial loss operator:
@@ -107,6 +127,46 @@ is retained only as a small-problem reference for verification.
 All eigenvalue normalization and convergence integrals use cylindrical cell
 volumes.
 
+## CE Reference And SPH
+
+The canonical JSON export now contains raw OpenMC tally means and standard
+deviations for every resolved region and energy group. It also contains a
+cylindrical `kappa-fission` mesh tally for radial and axial power comparison.
+These are raw per-source-particle tally results in fast-to-thermal group order;
+the independently normalized GeN-Foam auxiliary flux is not used for SPH.
+
+For region `i` and group `g`, the OpenMC and diffusion region-integrated fluxes
+are first normalized to equal total fission production. The direct fixed-point
+target is
+
+```text
+mu_i,g(target) = Phi_i,g(CE) / Phi_i,g(diffusion)
+```
+
+The update is under-relaxed in log space with damping 0.5. For each source
+group, `mu` multiplies absorption, fission, kappa-fission, and the full
+scattering row. It also multiplies the transport cross section, which is
+equivalent to
+
+```text
+D_i,g(SPH) = D_i,g / mu_i,g
+```
+
+`chi` is unchanged. The iteration stops after two consecutive iterations with
+all statistically active flux errors below 0.2% and a `k_eff` change below
+5 pcm. Factors are bounded and the fit fails explicitly on non-convergence.
+They are not adjusted directly to force the eigenvalue.
+
+`SphFactorSet` is immutable and records the factors, active mask, convergence
+history, source fingerprint, mesh, algorithm version, and provisional status.
+A factor file is rejected when its MGXS JSON, XML geometry, mesh, or algorithm
+version no longer matches.
+
+The existing four-group export cannot yet be fitted: it predates the raw CE
+reference payload and its CE `k_eff` standard deviation is 59.34 pcm. A final
+qualification run requires a regenerated export with uncertainty at or below
+15 pcm and the new flux and power tallies.
+
 ## Persistent Cache
 
 `backend/openmc_to_diffusion.py --prepare-cache` prepares a reusable cache under
@@ -115,12 +175,14 @@ volumes.
 - canonical MGXS JSON contents;
 - colocated `model.xml` contents;
 - mesh-spacing configuration;
+- the complete SPH factor artifact and algorithm version, when applied;
 - solver tolerances and algorithm schema.
 
 The cache persists:
 
 - radial and axial mesh edges;
-- cell-wise diffusion, absorption, fission, spectrum, and P0 scattering arrays;
+- cell-wise diffusion, absorption, fission, kappa-fission, spectrum, P0
+  scattering, and resolved-region index arrays;
 - one CSR spatial matrix per energy group;
 - the converged clean-core eigenvalue and flux.
 
@@ -130,21 +192,34 @@ in-memory factorizations only when a new solve needs them. A missing or stale
 cache is rebuilt synchronously. The cache is an optimization, not an alternate
 source of nuclear data.
 
-## Verification Milestone
+## Online Contract
 
-Before introducing SPH corrections, acceptance is based on:
+The backend exposes the four-group clean-core model at:
 
-- finite, positive, deterministic clean-core eigenvalues;
-- convergence without negative or non-finite states;
-- agreement between group-wise and global reference formulations on a small
-  mesh;
-- coherent mesh and group-count trends;
-- practical 16-group runtime on the boundary-fitted mesh.
+```text
+GET  /api/multigroup-diffusion/state
+POST /api/multigroup-diffusion/recompute
+```
 
-OpenMC continuous-energy and multigroup `k_eff` values are contextual
-references at this stage. Tight pcm agreement is not required until the
-uncorrected diffusion workflow is stable enough to support a controlled SPH
-calibration.
+Startup loads the persisted clean solution and corrected CSR operators when a
+matching factor artifact exists. A fresh solve runs only on explicit
+recompute. Missing factors produce a clearly marked uncorrected, provisional
+result. Rod position is not an input to this service; immediate rod behavior
+remains in point kinetics.
+
+## Qualification Criteria
+
+A final factor set is qualified only when:
+
+- CE `k_eff` uncertainty is at most 15 pcm;
+- corrected `k_eff` is within 50 pcm of the CE mean;
+- every statistically active region/group flux is within 1% of CE;
+- normalized radial and axial power profiles are within 2% RMS and 5%
+  pointwise;
+- repeated corrected solves agree within 1 pcm.
+
+Until those conditions are met, the web page reports the result as
+provisional rather than treating the calculation as a calibrated surrogate.
 
 # Results
 | Groups | MG OpenMC error vs CE | Diffusion error vs CE | Approx. diffusion bias vs MG |
@@ -154,3 +229,6 @@ calibration.
 |      4 |              +426 pcm |               −94 pcm |                     −520 pcm |
 |      8 |              +166 pcm |              −366 pcm |                     −532 pcm |
 |     16 |               +66 pcm |              −400 pcm |                     −466 pcm |
+
+These values are the uncorrected baseline. They are retained to show the
+group-condensation trend and are not SPH qualification results.

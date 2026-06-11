@@ -13,6 +13,7 @@ Your job is to make correct, well-verified changes. You verify your output with 
 - For OpenFOAM and OpenMC related developments, use the Conda openmc python environment (`conda activate openmc`)
 - For Modelica related development use the openmodelica installation (`omc`)
 - For backend web application development use UV with it's reactor_backend .venv
+- Latex files use tectonic compiler
 
 ## Core Principles
 

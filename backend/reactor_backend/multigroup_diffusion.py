@@ -50,6 +50,7 @@ class MultiGroupRegion:
     nu_fission: np.ndarray
     chi: np.ndarray
     scatter: np.ndarray
+    kappa_fission: np.ndarray | None = None
 
     def __post_init__(self):
         group_count = np.asarray(self.diffusion, dtype=float).reshape(-1).size
@@ -58,6 +59,12 @@ class MultiGroupRegion:
         object.__setattr__(self, "nu_fission", _as_1d(self.nu_fission, group_count, "nu_fission"))
         object.__setattr__(self, "chi", _as_1d(self.chi, group_count, "chi"))
         object.__setattr__(self, "scatter", _as_2d(self.scatter, group_count, "scatter"))
+        kappa_fission = (
+            self.nu_fission
+            if self.kappa_fission is None
+            else _as_1d(self.kappa_fission, group_count, "kappa_fission")
+        )
+        object.__setattr__(self, "kappa_fission", kappa_fission)
 
     @property
     def group_count(self) -> int:
@@ -109,6 +116,7 @@ class MultiGroupRegion:
                 "delta_absorption",
             ),
             nu_fission=np.zeros(self.group_count, dtype=float),
+            kappa_fission=np.zeros(self.group_count, dtype=float),
         )
 
 
@@ -245,8 +253,11 @@ class MultiGroupDiffusionSystem:
     diffusion: np.ndarray
     absorption: np.ndarray
     nu_fission: np.ndarray
+    kappa_fission: np.ndarray
     chi: np.ndarray
     scatter: np.ndarray
+    region_labels: tuple[str, ...]
+    region_index: np.ndarray
     x_insert: float
 
     @property
@@ -350,7 +361,16 @@ def _material_arrays(
     model: CylindricalLayeredModel2D,
     mesh: CylindricalMesh2D,
     x_insert: float,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+) -> tuple[
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    tuple[str, ...],
+    np.ndarray,
+]:
     if not 0.0 <= x_insert <= 1.0:
         raise ValueError("x_insert must lie in [0, 1]")
 
@@ -399,17 +419,37 @@ def _material_arrays(
     nu_fission = np.broadcast_to(
         model.reflector.nu_fission, (nr, nz, group_count)
     ).copy()
+    kappa_fission = np.broadcast_to(
+        model.reflector.kappa_fission, (nr, nz, group_count)
+    ).copy()
     chi = np.broadcast_to(model.reflector.chi, (nr, nz, group_count)).copy()
     scatter = np.broadcast_to(
         model.reflector.scatter, (nr, nz, group_count, group_count)
     ).copy()
 
+    region_labels = tuple(
+        dict.fromkeys(
+            [model.reflector.name]
+            + [region.name for _, region in zone_entries]
+        )
+    )
+    region_lookup = {
+        label: index for index, label in enumerate(region_labels)
+    }
+    region_index = np.full(
+        (nr, nz),
+        region_lookup[model.reflector.name],
+        dtype=np.int32,
+    )
+
     for mask, region in zone_entries:
         diffusion[mask] = region.diffusion
         absorption[mask] = region.absorption
         nu_fission[mask] = region.nu_fission
+        kappa_fission[mask] = region.kappa_fission
         chi[mask] = region.chi
         scatter[mask] = region.scatter
+        region_index[mask] = region_lookup[region.name]
 
     rod_tip = core_half_height - x_insert * model.core_height
     rod_mask = (
@@ -424,12 +464,25 @@ def _material_arrays(
             "delta_absorption_rod",
         )
         nu_fission[rod_mask] = 0.0
+        kappa_fission[rod_mask] = 0.0
         chi[rod_mask] = 0.0
         scatter[rod_mask] = 0.0
 
-    return tuple(
+    material_arrays = tuple(
         values.reshape((-1,) + values.shape[2:])
-        for values in (diffusion, absorption, nu_fission, chi, scatter)
+        for values in (
+            diffusion,
+            absorption,
+            nu_fission,
+            kappa_fission,
+            chi,
+            scatter,
+        )
+    )
+    return (
+        *material_arrays,
+        region_labels,
+        region_index.reshape(-1),
     )
 
 
@@ -533,9 +586,16 @@ def build_multigroup_2d_system(
     x_insert: float = 0.0,
 ) -> MultiGroupDiffusionSystem:
     mesh = mesh or build_concentric_mesh(model, spacing)
-    diffusion, absorption, nu_fission, chi, scatter = _material_arrays(
-        model, mesh, x_insert
-    )
+    (
+        diffusion,
+        absorption,
+        nu_fission,
+        kappa_fission,
+        chi,
+        scatter,
+        region_labels,
+        region_index,
+    ) = _material_arrays(model, mesh, x_insert)
     operators = []
     for group in range(model.group_count):
         outscatter = np.sum(scatter[:, group, :], axis=1) - scatter[:, group, group]
@@ -553,8 +613,11 @@ def build_multigroup_2d_system(
         diffusion=diffusion,
         absorption=absorption,
         nu_fission=nu_fission,
+        kappa_fission=kappa_fission,
         chi=chi,
         scatter=scatter,
+        region_labels=region_labels,
+        region_index=region_index,
         x_insert=float(x_insert),
     )
 
@@ -638,6 +701,11 @@ def _initial_flux(
             system.group_count,
         ):
             phi = supplied.reshape(-1, system.group_count).copy()
+        elif supplied.shape == (
+            system.cell_count,
+            system.group_count,
+        ):
+            phi = supplied.copy()
         else:
             phi = supplied.reshape(system.group_count, system.cell_count).T.copy()
     if not np.all(np.isfinite(phi)) or np.max(phi) <= 0.0:
@@ -650,6 +718,13 @@ def _fission_density(
     phi: np.ndarray,
 ) -> np.ndarray:
     return np.sum(system.nu_fission * phi, axis=1)
+
+
+def _power_density(
+    system: MultiGroupDiffusionSystem,
+    phi: np.ndarray,
+) -> np.ndarray:
+    return np.sum(system.kappa_fission * phi, axis=1)
 
 
 def _fission_production(
@@ -686,6 +761,7 @@ def _solution_payload(
     diagonal = np.arange(system.group_count)
     scatter[:, diagonal, diagonal] = 0.0
     fission_density = _fission_density(system, phi)
+    power_density = _power_density(system, phi)
     incoming = np.einsum("csg,cs->cg", scatter, phi, optimize=True)
     loss = np.column_stack(
         [
@@ -703,6 +779,9 @@ def _solution_payload(
         "k_eff": float(k_eff),
         "phi": phi_groups.sum(axis=0),
         "phi_groups": phi_groups,
+        "power_density": power_density.reshape(
+            system.mesh.nr, system.mesh.nz
+        ),
         "r_grid": system.mesh.r_grid,
         "z_grid": system.mesh.z_grid,
         "r_edges": system.mesh.r_edges,

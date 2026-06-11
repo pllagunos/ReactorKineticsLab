@@ -1,4 +1,9 @@
-import type { SimulationState, CoreFluxResponse, TransientDiffusionState } from './types'
+import type {
+  SimulationState,
+  CoreFluxResponse,
+  MultigroupDiffusionResponse,
+  TransientDiffusionState,
+} from './types'
 
 const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL ?? '/api').replace(/\/$/, '')
 
@@ -66,5 +71,16 @@ export const transientApi = {
   },
   step() {
     return request<TransientDiffusionState>('/transient-diffusion/step', { method: 'POST' })
+  },
+}
+
+export const multigroupDiffusionApi = {
+  getState() {
+    return request<MultigroupDiffusionResponse>('/multigroup-diffusion/state')
+  },
+  recompute() {
+    return request<MultigroupDiffusionResponse>('/multigroup-diffusion/recompute', {
+      method: 'POST',
+    })
   },
 }

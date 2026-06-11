@@ -21,9 +21,14 @@ from .multigroup_diffusion import (
     solve_multigroup_system,
 )
 from .openmc_mgxs_adapter import ConcentricDiffusionInput
+from .multigroup_sph import (
+    SphFactorSet,
+    build_sph_corrected_system,
+    corrected_regions,
+)
 
 
-CACHE_SCHEMA_VERSION = 3
+CACHE_SCHEMA_VERSION = 4
 DEFAULT_CACHE_ROOT = (
     Path(__file__).resolve().parents[1] / ".cache" / "openmc_diffusion"
 )
@@ -60,6 +65,7 @@ class PreparedDiffusionCase:
     cache_hit: bool
     fingerprint: str
     manifest: dict[str, Any]
+    sph_factors: SphFactorSet | None
 
     def summary(self) -> dict[str, Any]:
         return {
@@ -72,6 +78,16 @@ class PreparedDiffusionCase:
                 "Nr": self.system.mesh.nr,
                 "Nz": self.system.mesh.nz,
             },
+            "sph": (
+                None
+                if self.sph_factors is None
+                else {
+                    "applied": True,
+                    "converged": self.sph_factors.converged,
+                    "provisional": self.sph_factors.provisional,
+                    "iterations": self.sph_factors.iterations,
+                }
+            ),
             "clean_solution": {
                 "k_eff": self.clean_solution["k_eff"],
                 "iterations": self.clean_solution["iterations"],
@@ -84,6 +100,7 @@ class PreparedDiffusionCase:
 def _fingerprint(
     diffusion_input: ConcentricDiffusionInput,
     settings: DiffusionCacheSettings,
+    sph_factors: SphFactorSet | None,
 ) -> str:
     digest = hashlib.sha256()
     digest.update(f"schema:{CACHE_SCHEMA_VERSION}\n".encode())
@@ -102,6 +119,14 @@ def _fingerprint(
             separators=(",", ":"),
         ).encode()
     )
+    if sph_factors is not None:
+        digest.update(
+            json.dumps(
+                sph_factors.as_dict(),
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode()
+        )
     return digest.hexdigest()
 
 
@@ -109,6 +134,7 @@ def _solution_arrays(solution: dict[str, Any]) -> dict[str, np.ndarray]:
     return {
         "phi": np.asarray(solution["phi"]),
         "phi_groups": np.asarray(solution["phi_groups"]),
+        "power_density": np.asarray(solution["power_density"]),
         "r_grid": np.asarray(solution["r_grid"]),
         "z_grid": np.asarray(solution["z_grid"]),
         "r_edges": np.asarray(solution["r_edges"]),
@@ -143,6 +169,7 @@ def _write_cache(
     solution: dict[str, Any],
     settings: DiffusionCacheSettings,
     fingerprint: str,
+    sph_factors: SphFactorSet | None,
 ) -> dict[str, Any]:
     cache_dir.parent.mkdir(parents=True, exist_ok=True)
     temporary = Path(
@@ -164,8 +191,10 @@ def _write_cache(
             diffusion=system.diffusion,
             absorption=system.absorption,
             nu_fission=system.nu_fission,
+            kappa_fission=system.kappa_fission,
             chi=system.chi,
             scatter=system.scatter,
+            region_index=system.region_index,
         )
         np.savez_compressed(
             temporary / "clean_solution.npz",
@@ -176,12 +205,16 @@ def _write_cache(
             "fingerprint": fingerprint,
             "source": diffusion_input.summary(),
             "settings": settings.as_dict(),
+            "sph_factors": (
+                None if sph_factors is None else sph_factors.as_dict()
+            ),
             "system": {
                 "group_count": system.group_count,
                 "cell_count": system.cell_count,
                 "Nr": system.mesh.nr,
                 "Nz": system.mesh.nz,
                 "x_insert": system.x_insert,
+                "region_labels": list(system.region_labels),
                 "operator_files": operator_files,
                 "arrays_file": "system_arrays.npz",
             },
@@ -208,6 +241,7 @@ def _load_cache(
     diffusion_input: ConcentricDiffusionInput,
     fingerprint: str,
     settings: DiffusionCacheSettings,
+    sph_factors: SphFactorSet | None,
 ) -> PreparedDiffusionCase:
     manifest_path = cache_dir / "manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -234,7 +268,13 @@ def _load_cache(
         raise ValueError("Diffusion cache contains an invalid group-matrix shape")
     group_count = diffusion_input.group_count
     expected_vector_shape = (mesh.cell_count, group_count)
-    for name in ("diffusion", "absorption", "nu_fission", "chi"):
+    for name in (
+        "diffusion",
+        "absorption",
+        "nu_fission",
+        "kappa_fission",
+        "chi",
+    ):
         if arrays[name].shape != expected_vector_shape:
             raise ValueError(
                 f"Diffusion cache contains an invalid {name} array shape"
@@ -245,10 +285,23 @@ def _load_cache(
         group_count,
     ):
         raise ValueError("Diffusion cache contains an invalid scatter array shape")
+    if arrays["region_index"].shape != (mesh.cell_count,):
+        raise ValueError("Diffusion cache contains an invalid region-index shape")
 
-    model = diffusion_input.build_model(
-        delta_absorption_rod=settings.delta_absorption_rod
-    )
+    if sph_factors is None:
+        model = diffusion_input.build_model(
+            delta_absorption_rod=settings.delta_absorption_rod
+        )
+    else:
+        regions = corrected_regions(
+            diffusion_input,
+            sph_factors,
+            settings.spacing,
+        )
+        model = diffusion_input.build_model(
+            delta_absorption_rod=settings.delta_absorption_rod,
+            regions=regions,
+        )
     system = MultiGroupDiffusionSystem(
         model=model,
         mesh=mesh,
@@ -256,8 +309,11 @@ def _load_cache(
         diffusion=arrays["diffusion"],
         absorption=arrays["absorption"],
         nu_fission=arrays["nu_fission"],
+        kappa_fission=arrays["kappa_fission"],
         chi=arrays["chi"],
         scatter=arrays["scatter"],
+        region_labels=tuple(system_metadata["region_labels"]),
+        region_index=arrays["region_index"],
         x_insert=float(system_metadata["x_insert"]),
     )
 
@@ -274,6 +330,7 @@ def _load_cache(
         },
         "phi": solution_arrays["phi"],
         "phi_groups": solution_arrays["phi_groups"],
+        "power_density": solution_arrays["power_density"],
         "r_grid": solution_arrays["r_grid"],
         "z_grid": solution_arrays["z_grid"],
         "r_edges": solution_arrays["r_edges"],
@@ -288,6 +345,7 @@ def _load_cache(
         cache_hit=True,
         fingerprint=fingerprint,
         manifest=manifest,
+        sph_factors=sph_factors,
     )
 
 
@@ -297,8 +355,13 @@ def prepare_concentric_diffusion_cache(
     settings: DiffusionCacheSettings = DiffusionCacheSettings(),
     cache_root: str | Path = DEFAULT_CACHE_ROOT,
     force: bool = False,
+    sph_factors: SphFactorSet | None = None,
 ) -> PreparedDiffusionCase:
-    fingerprint = _fingerprint(diffusion_input, settings)
+    if sph_factors is not None and not sph_factors.converged:
+        raise ValueError(
+            "Cannot prepare a production cache with unconverged SPH factors"
+        )
+    fingerprint = _fingerprint(diffusion_input, settings, sph_factors)
     cache_dir = Path(cache_root).expanduser().resolve() / fingerprint
     if not force and (cache_dir / "manifest.json").is_file():
         return _load_cache(
@@ -306,16 +369,24 @@ def prepare_concentric_diffusion_cache(
             diffusion_input,
             fingerprint,
             settings,
+            sph_factors,
         )
 
-    model = diffusion_input.build_model(
-        delta_absorption_rod=settings.delta_absorption_rod
-    )
-    system = build_multigroup_2d_system(
-        model,
-        spacing=settings.spacing,
-        x_insert=0.0,
-    )
+    if sph_factors is None:
+        model = diffusion_input.build_model(
+            delta_absorption_rod=settings.delta_absorption_rod
+        )
+        system = build_multigroup_2d_system(
+            model,
+            spacing=settings.spacing,
+            x_insert=0.0,
+        )
+    else:
+        system = build_sph_corrected_system(
+            diffusion_input,
+            sph_factors,
+            settings.spacing,
+        )
     solution = solve_multigroup_system(
         system,
         max_iter=settings.max_iter,
@@ -331,6 +402,7 @@ def prepare_concentric_diffusion_cache(
         solution,
         settings,
         fingerprint,
+        sph_factors,
     )
     return PreparedDiffusionCase(
         diffusion_input=diffusion_input,
@@ -340,4 +412,5 @@ def prepare_concentric_diffusion_cache(
         cache_hit=False,
         fingerprint=fingerprint,
         manifest=manifest,
+        sph_factors=sph_factors,
     )

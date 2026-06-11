@@ -11,6 +11,7 @@ from reactor_backend.multigroup_diffusion import (
     MultiGroupRegion,
     _assemble_global_matrices,
     _fission_density,
+    _initial_flux,
     build_concentric_mesh,
     build_multigroup_2d_system,
     solve_multigroup_2d_global_reference,
@@ -196,6 +197,24 @@ class MultiGroupDiffusionTests(unittest.TestCase):
             global_reference["phi_groups"]
         )
         np.testing.assert_allclose(groupwise_shape, global_shape, rtol=2.0e-6)
+
+    def test_native_cell_group_initial_flux_preserves_ordering(self):
+        system = build_multigroup_2d_system(
+            _model(),
+            spacing=ConcentricMeshSpacing(
+                fuel_radial_cm=1.0,
+                core_coolant_radial_cm=1.0,
+                moderator_radial_cm=2.0,
+                reflector_radial_cm=2.0,
+                axial_cm=2.0,
+            ),
+        )
+        phi0 = np.arange(
+            system.cell_count * system.group_count,
+            dtype=float,
+        ).reshape(system.cell_count, system.group_count) + 1.0
+
+        np.testing.assert_array_equal(_initial_flux(system, phi0), phi0)
 
 
 if __name__ == "__main__":

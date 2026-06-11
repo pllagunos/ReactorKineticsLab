@@ -8,6 +8,7 @@ import re
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from pathlib import Path
+from collections.abc import Mapping
 from typing import Any
 
 import numpy as np
@@ -357,6 +358,7 @@ def _region_from_domain(
     scatter = _collapse_p0(scatter_payload.get("mean"), group_count)
     absorption = _vector(group_constants, "absorption", group_count)
     nu_fission = _vector(group_constants, "nu-fission", group_count)
+    kappa_fission = _vector(group_constants, "kappa-fission", group_count)
     chi = _vector(group_constants, "chi", group_count)
     diffusion = _vector(group_constants, "diffusion-coefficient", group_count)
     transport = _vector(group_constants, "transport", group_count)
@@ -364,6 +366,7 @@ def _region_from_domain(
     for field_name, values in (
         ("absorption", absorption),
         ("nu-fission", nu_fission),
+        ("kappa-fission", kappa_fission),
         ("chi", chi),
         (scatter_source, scatter),
     ):
@@ -438,6 +441,7 @@ def _region_from_domain(
         diffusion=diffusion,
         absorption=absorption,
         nu_fission=nu_fission,
+        kappa_fission=kappa_fission,
         chi=chi,
         scatter=scatter,
     )
@@ -543,6 +547,151 @@ def _build_zones(
 
 
 @dataclass(frozen=True)
+class ReferenceValues:
+    mean: np.ndarray
+    std_dev: np.ndarray
+
+    def __post_init__(self) -> None:
+        mean = np.asarray(self.mean, dtype=float).reshape(-1)
+        std_dev = np.asarray(self.std_dev, dtype=float).reshape(-1)
+        if mean.shape != std_dev.shape:
+            raise ValueError("Reference mean and standard deviation shapes differ")
+        if not np.all(np.isfinite(mean)) or not np.all(np.isfinite(std_dev)):
+            raise ValueError("Reference values must be finite")
+        if np.any(mean < 0.0) or np.any(std_dev < 0.0):
+            raise ValueError("Reference values must be non-negative")
+        mean.setflags(write=False)
+        std_dev.setflags(write=False)
+        object.__setattr__(self, "mean", mean)
+        object.__setattr__(self, "std_dev", std_dev)
+
+
+@dataclass(frozen=True)
+class PowerMeshReference:
+    r_edges_cm: np.ndarray
+    z_edges_cm: np.ndarray
+    mean: np.ndarray
+    std_dev: np.ndarray
+
+    def __post_init__(self) -> None:
+        r_edges = np.asarray(self.r_edges_cm, dtype=float).reshape(-1)
+        z_edges = np.asarray(self.z_edges_cm, dtype=float).reshape(-1)
+        mean = np.asarray(self.mean, dtype=float)
+        std_dev = np.asarray(self.std_dev, dtype=float)
+        expected = (r_edges.size - 1, z_edges.size - 1)
+        if r_edges.size < 2 or z_edges.size < 2:
+            raise ValueError("Power reference mesh requires radial and axial cells")
+        if np.any(np.diff(r_edges) <= 0.0) or np.any(np.diff(z_edges) <= 0.0):
+            raise ValueError("Power reference mesh edges must increase strictly")
+        if mean.shape != expected or std_dev.shape != expected:
+            raise ValueError(
+                f"Power reference arrays must have shape {expected}; "
+                f"got {mean.shape} and {std_dev.shape}"
+            )
+        if (
+            not np.all(np.isfinite(mean))
+            or not np.all(np.isfinite(std_dev))
+            or np.any(mean < 0.0)
+            or np.any(std_dev < 0.0)
+        ):
+            raise ValueError("Power reference values must be finite and non-negative")
+        for array in (r_edges, z_edges, mean, std_dev):
+            array.setflags(write=False)
+        object.__setattr__(self, "r_edges_cm", r_edges)
+        object.__setattr__(self, "z_edges_cm", z_edges)
+        object.__setattr__(self, "mean", mean)
+        object.__setattr__(self, "std_dev", std_dev)
+
+
+@dataclass(frozen=True)
+class ContinuousEnergyReference:
+    energy_order: str
+    normalization: str
+    region_flux: dict[str, ReferenceValues]
+    master_flux: ReferenceValues
+    power_mesh: PowerMeshReference | None
+
+
+def _reference_values(
+    payload: Any,
+    *,
+    group_count: int,
+    field_name: str,
+) -> ReferenceValues:
+    if not isinstance(payload, dict):
+        raise ValueError(f"{field_name} must be an object")
+    values = ReferenceValues(
+        mean=payload.get("mean", []),
+        std_dev=payload.get("std_dev", []),
+    )
+    if values.mean.shape != (group_count,):
+        raise ValueError(
+            f"{field_name} must contain {group_count} energy groups, "
+            f"got {values.mean.shape}"
+        )
+    return values
+
+
+def _load_ce_reference(
+    export: dict[str, Any],
+    *,
+    group_count: int,
+    domain_labels: set[str],
+) -> ContinuousEnergyReference | None:
+    payload = export.get("reference")
+    if payload is None:
+        return None
+    if not isinstance(payload, dict):
+        raise ValueError("MGXS reference payload must be an object")
+    if payload.get("energy_order") != "fast-to-thermal":
+        raise ValueError(
+            "MGXS reference energy_order must be 'fast-to-thermal'"
+        )
+
+    region_payload = payload.get("region_flux")
+    if not isinstance(region_payload, dict):
+        raise ValueError("MGXS reference is missing region_flux")
+    if set(region_payload) != domain_labels:
+        raise ValueError(
+            "MGXS reference region_flux labels do not match domains; "
+            f"missing={sorted(domain_labels - set(region_payload))}, "
+            f"extra={sorted(set(region_payload) - domain_labels)}"
+        )
+    region_flux = {
+        label: _reference_values(
+            values,
+            group_count=group_count,
+            field_name=f"reference.region_flux.{label}",
+        )
+        for label, values in region_payload.items()
+    }
+    master_flux = _reference_values(
+        payload.get("master_flux"),
+        group_count=group_count,
+        field_name="reference.master_flux",
+    )
+
+    power_payload = payload.get("power_mesh")
+    power_mesh = None
+    if power_payload is not None:
+        if not isinstance(power_payload, dict):
+            raise ValueError("reference.power_mesh must be an object")
+        power_mesh = PowerMeshReference(
+            r_edges_cm=power_payload.get("r_edges_cm", []),
+            z_edges_cm=power_payload.get("z_edges_cm", []),
+            mean=power_payload.get("mean", []),
+            std_dev=power_payload.get("std_dev", []),
+        )
+    return ContinuousEnergyReference(
+        energy_order="fast-to-thermal",
+        normalization=str(payload.get("normalization", "raw-openmc-tally")),
+        region_flux=region_flux,
+        master_flux=master_flux,
+        power_mesh=power_mesh,
+    )
+
+
+@dataclass(frozen=True)
 class ConcentricDiffusionInput:
     export_dir: Path
     model_xml_path: Path
@@ -559,6 +708,7 @@ class ConcentricDiffusionInput:
     domain_mapping: dict[str, str]
     validation: dict[str, Any]
     openmc_reference: dict[str, float]
+    ce_reference: ContinuousEnergyReference | None
 
     @property
     def group_count(self) -> int:
@@ -567,8 +717,25 @@ class ConcentricDiffusionInput:
     def build_model(
         self,
         delta_absorption_rod: float | np.ndarray = 0.0,
+        *,
+        regions: Mapping[str, MultiGroupRegion] | None = None,
     ) -> CylindricalLayeredModel2D:
-        core_reference = self.regions[self.fuel_ring_labels[0]]
+        selected_regions = dict(self.regions if regions is None else regions)
+        if set(selected_regions) != set(self.regions):
+            raise ValueError(
+                "A region override must contain every resolved region exactly"
+            )
+        corrected_zones = tuple(
+            CylindricalRegionZone2D(
+                region=selected_regions[zone.region.name],
+                r_min=zone.r_min,
+                r_max=zone.r_max,
+                z_min=zone.z_min,
+                z_max=zone.z_max,
+            )
+            for zone in self.zones
+        )
+        core_reference = selected_regions[self.fuel_ring_labels[0]]
         return CylindricalLayeredModel2D(
             core_radius=self.geometry["core_radius_cm"],
             moderator_radius=self.geometry["moderator_radius_cm"],
@@ -576,11 +743,11 @@ class ConcentricDiffusionInput:
             core_height=self.geometry["core_height_cm"],
             outer_height=self.geometry["outer_height_cm"],
             core=core_reference,
-            moderator=self.regions["moderator"],
-            reflector=self.regions["reflector"],
+            moderator=selected_regions["moderator"],
+            reflector=selected_regions["reflector"],
             rod_radius=self.geometry["rod_radius_cm"],
             delta_absorption_rod=delta_absorption_rod,
-            zones=self.zones,
+            zones=corrected_zones,
         )
 
     def summary(self) -> dict[str, Any]:
@@ -602,6 +769,20 @@ class ConcentricDiffusionInput:
                 "zones": self.zone_report,
                 "validation": self.validation,
                 "openmc_reference": self.openmc_reference,
+                "ce_reference": (
+                    None
+                    if self.ce_reference is None
+                    else {
+                        "energy_order": self.ce_reference.energy_order,
+                        "normalization": self.ce_reference.normalization,
+                        "region_flux_labels": sorted(
+                            self.ce_reference.region_flux
+                        ),
+                        "power_mesh_present": (
+                            self.ce_reference.power_mesh is not None
+                        ),
+                    }
+                ),
             }
         )
 
@@ -631,6 +812,11 @@ def load_concentric_diffusion_input(
         raise ValueError("energy_group_edges_ev must be strictly increasing")
     group_count = len(edges) - 1
     source_legendre_order = int(config.get("legendre_order", 0))
+    ce_reference = _load_ce_reference(
+        export,
+        group_count=group_count,
+        domain_labels=set(export["domains"]),
+    )
 
     regions: dict[str, MultiGroupRegion] = {}
     domain_validation: dict[str, Any] = {}
@@ -694,4 +880,5 @@ def load_concentric_diffusion_input(
         domain_mapping=mapping,
         validation=validation,
         openmc_reference=openmc_reference,
+        ce_reference=ce_reference,
     )

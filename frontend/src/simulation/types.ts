@@ -125,6 +125,57 @@ export type CoreFluxResponse = {
 }
 
 // ---------------------------------------------------------------------------
+// Clean-core resolved multigroup diffusion page
+// ---------------------------------------------------------------------------
+
+export type MultigroupDiffusionProfile = {
+  axisCm: number[]
+  values: number[]
+}
+
+export type MultigroupDiffusionGeometry = {
+  coreRadiusCm: number
+  moderatorRadiusCm: number
+  reflectorRadiusCm: number
+  coreHeightCm: number
+  outerHeightCm: number
+  resolvedRegionCount: number
+}
+
+export type MultigroupDiffusionMetadata = {
+  cleanCore: boolean
+  groupCount: number
+  kEff: number
+  openmcReferenceKEff: number
+  openmcReferenceStdDevPcm: number
+  differencePcm: number
+  iterations: number
+  cached: boolean
+  cellCount: number
+  meshSpacingCm: Record<string, number>
+  timingsSeconds: Record<string, number>
+  sphApplied: boolean
+  sphIterations: number | null
+  provisional: boolean
+  qualified: boolean
+  qualification: Record<string, unknown>
+}
+
+export type MultigroupDiffusionResponse = {
+  heatmapRCm: number[]
+  heatmapZCm: number[]
+  heatmapFlux: number[][]
+  heatmapPower: number[][]
+  radialFlux: MultigroupDiffusionProfile
+  axialFlux: MultigroupDiffusionProfile
+  radialPower: MultigroupDiffusionProfile
+  axialPower: MultigroupDiffusionProfile
+  energyGroupEdgesEv: number[]
+  geometry: MultigroupDiffusionGeometry
+  metadata: MultigroupDiffusionMetadata
+}
+
+// ---------------------------------------------------------------------------
 // Transient diffusion page
 // ---------------------------------------------------------------------------
 

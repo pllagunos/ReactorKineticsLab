@@ -1,4 +1,4 @@
-from typing import Literal, Optional
+from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -138,6 +138,58 @@ class CoreFluxResponse(BaseModel):
     axial: CoreFluxProfile
     geometry: CoreFluxGeometry
     metadata: CoreFluxMetadata
+
+
+# ---------------------------------------------------------------------------
+# Clean-core resolved multigroup diffusion page
+# ---------------------------------------------------------------------------
+
+
+class MultigroupDiffusionProfile(BaseModel):
+    axisCm: list[float]
+    values: list[float]
+
+
+class MultigroupDiffusionGeometry(BaseModel):
+    coreRadiusCm: float
+    moderatorRadiusCm: float
+    reflectorRadiusCm: float
+    coreHeightCm: float
+    outerHeightCm: float
+    resolvedRegionCount: int
+
+
+class MultigroupDiffusionMetadata(BaseModel):
+    cleanCore: bool
+    groupCount: int
+    kEff: float
+    openmcReferenceKEff: float
+    openmcReferenceStdDevPcm: float
+    differencePcm: float
+    iterations: int
+    cached: bool
+    cellCount: int
+    meshSpacingCm: dict[str, float]
+    timingsSeconds: dict[str, float]
+    sphApplied: bool
+    sphIterations: int | None
+    provisional: bool
+    qualified: bool
+    qualification: dict[str, Any]
+
+
+class MultigroupDiffusionResponse(BaseModel):
+    heatmapRCm: list[float]
+    heatmapZCm: list[float]
+    heatmapFlux: list[list[float]]
+    heatmapPower: list[list[float]]
+    radialFlux: MultigroupDiffusionProfile
+    axialFlux: MultigroupDiffusionProfile
+    radialPower: MultigroupDiffusionProfile
+    axialPower: MultigroupDiffusionProfile
+    energyGroupEdgesEv: list[float]
+    geometry: MultigroupDiffusionGeometry
+    metadata: MultigroupDiffusionMetadata
 
 
 # ---------------------------------------------------------------------------

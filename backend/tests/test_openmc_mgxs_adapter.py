@@ -70,6 +70,7 @@ def _group_constants(
         },
         "absorption": {"mean": [0.01, 0.02], "std_dev": [0.0, 0.0]},
         "nu-fission": {"mean": [0.02, 0.03], "std_dev": [0.0, 0.0]},
+        "kappa-fission": {"mean": [1.0, 2.0], "std_dev": [0.0, 0.0]},
         "chi": {"mean": [1.0, 0.0], "std_dev": [0.0, 0.0]},
         "scatter matrix": {
             "mean": scatter or [[0.10, 0.04], [0.01, 0.20]],
@@ -99,6 +100,27 @@ def _export() -> dict:
             "scatter_correction": None,
         },
         "domains": domains,
+        "reference": {
+            "energy_order": "fast-to-thermal",
+            "normalization": "raw OpenMC tally mean per source particle",
+            "region_flux": {
+                label: {
+                    "mean": [1.0, 2.0],
+                    "std_dev": [0.01, 0.02],
+                }
+                for label in domains
+            },
+            "master_flux": {
+                "mean": [float(len(domains)), float(2 * len(domains))],
+                "std_dev": [0.01, 0.02],
+            },
+            "power_mesh": {
+                "r_edges_cm": [0.0, 2.5, 5.0],
+                "z_edges_cm": [-150.0, 0.0, 150.0],
+                "mean": [[1.0, 2.0], [3.0, 4.0]],
+                "std_dev": [[0.1, 0.1], [0.1, 0.1]],
+            },
+        },
         "run": {
             "keff": {"mean": 1.001, "std_dev": 0.0001},
             "reactivity_pcm": 99.9,
@@ -215,6 +237,21 @@ class OpenMCMGXSAdapterTests(unittest.TestCase):
         ]
         with self.assertRaisesRegex(ValueError, "must contain 2 values"):
             self.load(export)
+
+    def test_loads_raw_ce_reference_without_groupwise_normalization(self):
+        loaded = self.load(_export())
+
+        self.assertIsNotNone(loaded.ce_reference)
+        assert loaded.ce_reference is not None
+        np.testing.assert_allclose(
+            loaded.ce_reference.region_flux["core_fuel_ring_1"].mean,
+            [1.0, 2.0],
+        )
+        self.assertEqual(
+            loaded.ce_reference.energy_order,
+            "fast-to-thermal",
+        )
+        self.assertEqual(loaded.ce_reference.power_mesh.mean.shape, (2, 2))
 
     def test_rejects_inconsistent_diffusion_coefficient(self):
         export = _export()

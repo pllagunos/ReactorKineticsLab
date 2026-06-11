@@ -6,11 +6,13 @@ from .schemas import (
     RunningRequest,
     SimulationState,
     CoreFluxResponse,
+    MultigroupDiffusionResponse,
     TransientDiffusionState,
 )
 from .service import simulation_service
 from .core_service import get_core_flux
 from .transient_service import transient_diffusion_service
+from .multigroup_service import multigroup_diffusion_service
 
 
 app = FastAPI(title="Reactor simulator backend")
@@ -68,6 +70,27 @@ def get_core_flux_endpoint() -> CoreFluxResponse:
     """
     rod_pct = simulation_service.get_state().snapshot.rodInsertionPercent
     return get_core_flux(rod_pct)
+
+
+# ---------------------------------------------------------------------------
+# Clean-core resolved multigroup diffusion page
+# ---------------------------------------------------------------------------
+
+
+@app.get(
+    "/api/multigroup-diffusion/state",
+    response_model=MultigroupDiffusionResponse,
+)
+def get_multigroup_diffusion_state() -> MultigroupDiffusionResponse:
+    return multigroup_diffusion_service.get_state()
+
+
+@app.post(
+    "/api/multigroup-diffusion/recompute",
+    response_model=MultigroupDiffusionResponse,
+)
+def recompute_multigroup_diffusion() -> MultigroupDiffusionResponse:
+    return multigroup_diffusion_service.recompute()
 
 
 # ---------------------------------------------------------------------------
