@@ -102,7 +102,6 @@ Compatible exports contain:
 - `consistent nu-scatter matrix`
 - `chi-prompt`
 - `scatter_correction = null`
-- `scatter_formulation = "consistent"`
 - one-group `Beta` and decay-rate kinetics data
 
 The writer uses the P0 moment of the consistent nu-scatter matrix and computes:

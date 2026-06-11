@@ -26,6 +26,7 @@ DEFAULT_MGXS_TYPES = (
     "chi",
     "chi-prompt",
     "scatter matrix",
+    "consistent scatter matrix",
     "nu-scatter matrix",
     "consistent nu-scatter matrix",
     "inverse-velocity",
@@ -67,7 +68,6 @@ class MGXSExportConfig:
     delayed_groups: tuple[int, ...] = DEFAULT_DELAYED_GROUPS
     legendre_order: int = 0
     scatter_correction: str | None = None
-    scatter_formulation: str = "consistent"
     kinetics_group_count: int = 1
 
 
@@ -347,7 +347,6 @@ def load_model_from_xml(
         "mgxs_types": list(config.mgxs_types),
         "delayed_groups": list(config.delayed_groups),
         "scatter_correction": config.scatter_correction,
-        "scatter_formulation": config.scatter_formulation,
         "kinetics_group_count": config.kinetics_group_count,
     }
     metadata["tally_cleanup"] = tally_cleanup

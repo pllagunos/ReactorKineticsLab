@@ -138,11 +138,6 @@ def validate_genfoam_scattering_contract(export: dict[str, Any]) -> None:
             "The MGXS export does not explicitly disable OpenMC's P0 scatter correction. "
             "Re-run prepare_concentric_case.py with --rerun-mgxs to generate GeN-Foam-compatible scattering data."
         )
-    if config.get("scatter_formulation") != "consistent":
-        raise ValueError(
-            "The MGXS export does not declare the consistent scattering formulation. "
-            "Re-run prepare_concentric_case.py with --rerun-mgxs."
-        )
     if config.get("kinetics_group_count") != 1:
         raise ValueError(
             "The MGXS export does not use one-group Beta and decay-rate kinetics data. "
@@ -236,7 +231,6 @@ def _extract_source_export(
             else int(configured_run.get("legendre_order", config_payload["legendre_order"]))
         ),
         scatter_correction=None,
-        scatter_formulation="consistent",
         kinetics_group_count=1,
     )
     rerun_export_dir = output_dir / "mgxs_rerun_export"
@@ -564,7 +558,6 @@ def generate_genfoam_xs(
             "domain_order": domain_order,
             "legendre_order": int(export["config"]["legendre_order"]),
             "scatter_correction": export["config"]["scatter_correction"],
-            "scatter_formulation": export["config"]["scatter_formulation"],
             "kinetics_group_count": int(export["config"]["kinetics_group_count"]),
             "scatter_matrix_sources": {
                 zone_name: raw_zones[zone_name]["metadata"]["scatter_matrix_source"]
