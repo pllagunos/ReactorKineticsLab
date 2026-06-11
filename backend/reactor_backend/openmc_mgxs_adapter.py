@@ -549,6 +549,8 @@ class ConcentricDiffusionInput:
     mgxs_json_path: Path
     energy_group_edges_ev: tuple[float, ...]
     source_legendre_order: int
+    scatter_correction: str | None
+    validation_scatter_correction: str | None
     geometry: dict[str, Any]
     regions: dict[str, MultiGroupRegion]
     zones: tuple[CylindricalRegionZone2D, ...]
@@ -592,7 +594,8 @@ class ConcentricDiffusionInput:
                 "source_legendre_order": self.source_legendre_order,
                 "diffusion_scattering_moment": "P0",
                 "discarded_higher_moments": self.source_legendre_order > 0,
-                "scatter_correction": None,
+                "scatter_correction": self.scatter_correction,
+                "validation_scatter_correction": self.validation_scatter_correction,
                 "geometry": self.geometry,
                 "domain_mapping": self.domain_mapping,
                 "zone_count": len(self.zones),
@@ -679,6 +682,10 @@ def load_concentric_diffusion_input(
         mgxs_json_path=mgxs_json_path,
         energy_group_edges_ev=edges,
         source_legendre_order=source_legendre_order,
+        scatter_correction=config["scatter_correction"],
+        validation_scatter_correction=config.get(
+            "validation_scatter_correction"
+        ),
         geometry=geometry,
         regions=regions,
         zones=zones,

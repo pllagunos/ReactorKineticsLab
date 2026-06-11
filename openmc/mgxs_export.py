@@ -68,6 +68,7 @@ class MGXSExportConfig:
     delayed_groups: tuple[int, ...] = DEFAULT_DELAYED_GROUPS
     legendre_order: int = 0
     scatter_correction: str | None = None
+    validation_scatter_correction: str | None = "P0"
     kinetics_group_count: int = 1
 
 
@@ -347,6 +348,7 @@ def load_model_from_xml(
         "mgxs_types": list(config.mgxs_types),
         "delayed_groups": list(config.delayed_groups),
         "scatter_correction": config.scatter_correction,
+        "validation_scatter_correction": config.validation_scatter_correction,
         "kinetics_group_count": config.kinetics_group_count,
     }
     metadata["tally_cleanup"] = tally_cleanup
@@ -362,10 +364,55 @@ def _find_cell_by_name(geometry: openmc.Geometry, cell_name: str) -> openmc.Cell
     return matches[0]
 
 
+def _build_mgxs_library(
+    geometry: openmc.Geometry,
+    domains: dict[str, openmc.Cell],
+    energy_groups: mgxs.EnergyGroups,
+    *,
+    mgxs_types: tuple[str, ...],
+    legendre_order: int,
+    correction: str | None,
+    name: str,
+) -> mgxs.Library:
+    library = mgxs.Library(
+        geometry=geometry,
+        by_nuclide=False,
+        mgxs_types=list(mgxs_types),
+        name=name,
+    )
+    library.energy_groups = energy_groups
+    library.domain_type = "cell"
+    library.domains = list(domains.values())
+    library.legendre_order = legendre_order
+    library.correction = correction
+    library.build_library()
+    return library
+
+
+def _validation_mgxs_types(config: MGXSExportConfig) -> tuple[str, ...]:
+    required = {
+        "consistent scatter matrix",
+        "consistent nu-scatter matrix",
+    }
+    missing = sorted(required - set(config.mgxs_types))
+    if missing:
+        raise ValueError(
+            "P0-corrected OpenMC MG validation requires "
+            f"{', '.join(missing)} in config.mgxs_types"
+        )
+    ordinary_scatter = {"scatter matrix", "nu-scatter matrix"}
+    return tuple(
+        xs_type
+        for xs_type in config.mgxs_types
+        if xs_type not in ordinary_scatter
+    )
+
+
 def attach_mgxs_tallies(
     model: openmc.Model,
     config: MGXSExportConfig,
 ) -> tuple[
+    mgxs.Library,
     mgxs.Library,
     dict[str, mgxs.Beta],
     dict[str, mgxs.DecayRate],
@@ -379,6 +426,19 @@ def attach_mgxs_tallies(
     geometry = model.geometry
     if geometry is None:
         raise ValueError("Model must contain geometry before MGXS tallies can be attached")
+    if config.scatter_correction is not None:
+        raise ValueError(
+            "The canonical MGXS export must use scatter_correction=None. "
+            "Use validation_scatter_correction for OpenMC MG validation."
+        )
+    if (
+        config.validation_scatter_correction == "P0"
+        and config.legendre_order != 0
+    ):
+        raise ValueError(
+            "OpenMC ignores P0 correction when legendre_order is greater "
+            "than zero; use a P0 export for corrected MG validation."
+        )
 
     domain_mapping = domain_mapping_from_definitions(config.domain_definitions)
     domains = {
@@ -393,30 +453,32 @@ def attach_mgxs_tallies(
     )
     root_universe = geometry.root_universe
 
-    library = mgxs.Library(
-        geometry=geometry,
-        by_nuclide=False,
-        mgxs_types=list(config.mgxs_types),
-        name="region-mgxs",
+    library = _build_mgxs_library(
+        geometry,
+        domains,
+        energy_groups,
+        mgxs_types=config.mgxs_types,
+        legendre_order=legendre_order_for_moment(config.legendre_order),
+        correction=None,
+        name="region-mgxs-canonical",
     )
-    library.energy_groups = energy_groups
-    library.domain_type = "cell"
-    library.domains = list(domains.values())
-    library.legendre_order = legendre_order_for_moment(config.legendre_order)
-    library.build_library()
-
-    for domain in library.domains:
-        for xs_type in config.mgxs_types:
-            if "scatter matrix" not in xs_type:
-                continue
-            scatter_xs = library.get_mgxs(domain, xs_type)
-            scatter_xs.correction = config.scatter_correction
+    validation_library = _build_mgxs_library(
+        geometry,
+        domains,
+        energy_groups,
+        mgxs_types=_validation_mgxs_types(config),
+        legendre_order=legendre_order_for_moment(config.legendre_order),
+        correction=config.validation_scatter_correction,
+        name="region-mgxs-validation",
+    )
 
     tallies = openmc.Tallies()
     if hasattr(library, "add_to_tallies"):
         library.add_to_tallies(tallies, merge=True)
+        validation_library.add_to_tallies(tallies, merge=True)
     else:
         library.add_to_tallies_file(tallies, merge=True)
+        validation_library.add_to_tallies_file(tallies, merge=True)
 
     beta_by_domain = {
         label: mgxs.Beta(
@@ -483,7 +545,7 @@ def attach_mgxs_tallies(
     tallies.append(prompt_generation_time_tally, merge=False)
 
     model.tallies = tallies
-    return library, beta_by_domain, decay_rate_by_domain, chi_delayed_by_domain, integral_flux_by_domain, master_flux_tally, prompt_generation_time_tally, domains, {
+    return library, validation_library, beta_by_domain, decay_rate_by_domain, chi_delayed_by_domain, integral_flux_by_domain, master_flux_tally, prompt_generation_time_tally, domains, {
         "domains": {
             label: {
                 "domain_id": domain.id,
@@ -495,6 +557,12 @@ def attach_mgxs_tallies(
         "energy_groups": list(config.energy_group_edges_ev),
         "legendre_order": int(config.legendre_order),
         "scattering_moment": scattering_moment_for_legendre_order(config.legendre_order),
+        "canonical_scatter_correction": None,
+        "validation_scatter_correction": config.validation_scatter_correction,
+        "validation_scatter_types": [
+            "consistent scatter matrix",
+            "consistent nu-scatter matrix",
+        ],
         "auxiliary_tallies": {
             "chi_delayed_domains": len(chi_delayed_by_domain),
             "integral_flux_domains": len(integral_flux_by_domain),
@@ -873,6 +941,7 @@ def run_mgxs_export(
     model, model_metadata = load_model_from_xml(export_paths["model_xml_path"], config)
     (
         library,
+        validation_library,
         beta_by_domain,
         decay_rate_by_domain,
         chi_delayed_by_domain,
@@ -883,6 +952,10 @@ def run_mgxs_export(
         tally_metadata,
     ) = attach_mgxs_tallies(model, config)
     model_metadata["mgxs_tallies"] = tally_metadata
+    model_metadata["mgxs_validation_library"] = {
+        "scatter_correction": validation_library.correction,
+        "mgxs_types": list(validation_library.mgxs_types),
+    }
 
     statepoint_path = model.run(
         cwd=export_paths["run_dir"],
@@ -939,6 +1012,7 @@ def run_openmc_mg_validation(
     model, model_metadata = load_model_from_xml(model_path_or_dir, config)
     (
         library,
+        validation_library,
         beta_by_domain,
         decay_rate_by_domain,
         chi_delayed_by_domain,
@@ -953,12 +1027,14 @@ def run_openmc_mg_validation(
     validation_dir.mkdir(parents=True, exist_ok=True)
 
     with openmc.StatePoint(statepoint_path) as statepoint:
-        library.load_from_statepoint(statepoint)
+        validation_library.load_from_statepoint(statepoint)
         for beta in beta_by_domain.values():
             beta.load_from_statepoint(statepoint)
         for decay_rate in decay_rate_by_domain.values():
             decay_rate.load_from_statepoint(statepoint)
-        mgxs_file, materials, geometry = library.create_mg_mode(apply_domain_chi=apply_domain_chi)
+        mgxs_file, materials, geometry = validation_library.create_mg_mode(
+            apply_domain_chi=apply_domain_chi
+        )
 
     mgxs_hdf5_path = validation_dir / "mgxs.h5"
     mgxs_file.export_to_hdf5(mgxs_hdf5_path)
@@ -1003,6 +1079,8 @@ def run_openmc_mg_validation(
             "group_count": len(config.energy_group_edges_ev) - 1,
             "max_order": settings.max_order,
             "temperature": settings.temperature,
+            "scatter_correction": validation_library.correction,
+            "scatter_matrix_type": "consistent nu-scatter matrix",
         },
         "model": {
             **model_metadata,
