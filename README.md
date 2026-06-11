@@ -113,7 +113,7 @@ Key backend files:
 - `backend/reactor_backend/app.py`
   - FastAPI routes
 
-## API shape
+## API shape (is this needed -> ne, maybe a webpage architecture MD file)
 
 The current backend exposes:
 
@@ -237,15 +237,12 @@ This is still an educational first slice. Intentional simplifications:
 
 Now that the physics layer is in Python, natural next steps are:
 
-- fix concentricModel.ipynb so we get a fast determinstic solver and get a rod-worth curve
-- perhaps make it work with the P1 approximation
-- one PK model of core is ready, replace backend core with openmc concentric core
-- decide what to do with diffusion solver as 1 energy diffusion is very bad
-
+- once PK model of core is ready, replace backend core with openmc concentric core
+- get 2/4 group diffusion with SPH and use that in diffusion page
 - see `theory/ThermalHydraulics.tex` adjust to new core size
 - adjust modelica model
-
 - FMU build handlded outside of python and frozen (not gitignored)? or handled by a script, like with bun run backend:install? this way simulator can run on macos (if doable)
+- future: krylov instead of gauss-seidel
 
 # architecture documentation:
 
