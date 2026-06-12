@@ -162,6 +162,49 @@ class SphFitResult:
     system: MultiGroupDiffusionSystem
     solution: dict[str, Any]
     qualification: dict[str, Any]
+    factor_history: tuple[np.ndarray, ...]
+
+
+class SphConvergenceError(RuntimeError):
+    def __init__(self, message: str, result: SphFitResult) -> None:
+        super().__init__(message)
+        self.result = result
+
+
+@dataclass(frozen=True)
+class SphReferenceData:
+    region_labels: tuple[str, ...]
+    flux: np.ndarray
+    std_dev: np.ndarray
+    relative_std_dev: np.ndarray
+    active: np.ndarray
+    fission_production: float
+
+    def __post_init__(self) -> None:
+        flux = _readonly_array(self.flux)
+        std_dev = _readonly_array(self.std_dev)
+        relative_std_dev = _readonly_array(self.relative_std_dev)
+        active = _readonly_array(self.active, dtype=bool)
+        if flux.ndim != 2:
+            raise ValueError("SPH reference flux must have shape (regions, groups)")
+        expected = (len(self.region_labels), flux.shape[1])
+        if flux.shape != expected:
+            raise ValueError("SPH reference flux must have shape (regions, groups)")
+        if (
+            std_dev.shape != flux.shape
+            or relative_std_dev.shape != flux.shape
+            or active.shape != flux.shape
+        ):
+            raise ValueError("SPH reference arrays must have matching shapes")
+        if (
+            not math.isfinite(self.fission_production)
+            or self.fission_production <= 0.0
+        ):
+            raise ValueError("SPH reference fission production must be positive")
+        object.__setattr__(self, "flux", flux)
+        object.__setattr__(self, "std_dev", std_dev)
+        object.__setattr__(self, "relative_std_dev", relative_std_dev)
+        object.__setattr__(self, "active", active)
 
 
 def save_sph_factors(
@@ -305,11 +348,17 @@ def region_integrated_flux(
     return integrated
 
 
-def _normalized_reference_flux(
+def build_sph_reference(
     diffusion_input: ConcentricDiffusionInput,
-    region_labels: tuple[str, ...],
-    settings: SphSettings,
-) -> tuple[np.ndarray, np.ndarray, float]:
+    settings: SphSettings = SphSettings(),
+    *,
+    region_labels: tuple[str, ...] | None = None,
+) -> SphReferenceData:
+    labels = (
+        _ordered_region_labels(diffusion_input)
+        if region_labels is None
+        else region_labels
+    )
     reference = diffusion_input.ce_reference
     if reference is None:
         raise ValueError(
@@ -317,13 +366,13 @@ def _normalized_reference_flux(
             "in the MGXS export"
         )
     flux = np.vstack(
-        [reference.region_flux[label].mean for label in region_labels]
+        [reference.region_flux[label].mean for label in labels]
     )
     std_dev = np.vstack(
-        [reference.region_flux[label].std_dev for label in region_labels]
+        [reference.region_flux[label].std_dev for label in labels]
     )
     nu_fission = np.vstack(
-        [diffusion_input.regions[label].nu_fission for label in region_labels]
+        [diffusion_input.regions[label].nu_fission for label in labels]
     )
     production = float(np.sum(nu_fission * flux))
     if not math.isfinite(production) or production <= 0.0:
@@ -347,7 +396,14 @@ def _normalized_reference_flux(
             "Continuous-energy reference has no statistically active "
             "region/group flux bins"
         )
-    return flux, active, production
+    return SphReferenceData(
+        region_labels=labels,
+        flux=flux,
+        std_dev=std_dev,
+        relative_std_dev=relative_std,
+        active=active,
+        fission_production=production,
+    )
 
 
 def _solution_phi0(solution: dict[str, Any]) -> np.ndarray:
@@ -372,11 +428,13 @@ def fit_sph_factors(
     settings: SphSettings = SphSettings(),
 ) -> SphFitResult:
     region_labels = _ordered_region_labels(diffusion_input)
-    reference_flux, active, _ = _normalized_reference_flux(
+    reference = build_sph_reference(
         diffusion_input,
-        region_labels,
         settings,
+        region_labels=region_labels,
     )
+    reference_flux = reference.flux
+    active = reference.active
     factors = np.ones_like(reference_flux)
     fingerprint = sph_source_fingerprint(diffusion_input, spacing)
     history: list[dict[str, float | int]] = []
@@ -384,8 +442,10 @@ def fit_sph_factors(
     stable_count = 0
     final_system = None
     final_solution = None
+    factor_history: list[np.ndarray] = []
 
     for iteration in range(1, settings.max_iterations + 1):
+        factor_history.append(factors.copy())
         candidate = SphFactorSet(
             region_labels=region_labels,
             factors=factors,
@@ -466,10 +526,38 @@ def fit_sph_factors(
         )
         previous_k = k_eff
     else:
-        raise RuntimeError(
+        assert final_system is not None and final_solution is not None
+        failed_factor_set = SphFactorSet(
+            region_labels=region_labels,
+            factors=factor_history[-1],
+            active=active,
+            converged=False,
+            iterations=len(history),
+            history=tuple(history),
+            source_fingerprint=fingerprint,
+            mesh_spacing=spacing.as_dict(),
+            provisional=True,
+        )
+        failed_result = SphFitResult(
+            factors=failed_factor_set,
+            system=final_system,
+            solution=final_solution,
+            qualification=evaluate_sph_qualification(
+                diffusion_input,
+                final_system,
+                final_solution,
+                failed_factor_set,
+            ),
+            factor_history=tuple(
+                _readonly_array(values)
+                for values in factor_history
+            ),
+        )
+        raise SphConvergenceError(
             "SPH iteration did not converge within "
             f"{settings.max_iterations} iterations; "
-            f"last max flux error={history[-1]['max_flux_error']:.6g}"
+            f"last max flux error={history[-1]['max_flux_error']:.6g}",
+            failed_result,
         )
 
     assert final_system is not None and final_solution is not None
@@ -503,6 +591,10 @@ def fit_sph_factors(
         system=final_system,
         solution=final_solution,
         qualification=qualification,
+        factor_history=tuple(
+            _readonly_array(values)
+            for values in factor_history
+        ),
     )
 
 
@@ -685,11 +777,12 @@ def evaluate_sph_qualification(
         ConcentricMeshSpacing(**factor_set.mesh_spacing),
         factor_set,
     )
-    reference_flux, _, _ = _normalized_reference_flux(
+    reference = build_sph_reference(
         diffusion_input,
-        factor_set.region_labels,
         SphSettings(),
+        region_labels=factor_set.region_labels,
     )
+    reference_flux = reference.flux
     active = factor_set.active
     if active.shape != reference_flux.shape or not np.any(active):
         raise ValueError(

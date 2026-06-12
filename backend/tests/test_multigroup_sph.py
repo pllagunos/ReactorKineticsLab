@@ -12,9 +12,11 @@ from reactor_backend.multigroup_diffusion import (
     solve_multigroup_system,
 )
 from reactor_backend.multigroup_sph import (
+    SphConvergenceError,
     SphFactorSet,
     SphSettings,
     build_sph_corrected_system,
+    build_sph_reference,
     corrected_regions,
     fit_sph_factors,
     qualify_mesh,
@@ -262,7 +264,10 @@ class MultiGroupSphTests(unittest.TestCase):
         )
 
     def test_reports_non_convergence(self):
-        with self.assertRaisesRegex(RuntimeError, "did not converge"):
+        with self.assertRaisesRegex(
+            SphConvergenceError,
+            "did not converge",
+        ) as raised:
             fit_sph_factors(
                 self._diffusion_reference_input(),
                 spacing=self.spacing,
@@ -271,6 +276,11 @@ class MultiGroupSphTests(unittest.TestCase):
                     stable_iterations=2,
                 ),
             )
+        result = raised.exception.result
+        self.assertFalse(result.factors.converged)
+        self.assertEqual(len(result.factor_history), 1)
+        self.assertEqual(result.factors.iterations, 1)
+        self.assertFalse(result.qualification["qualified"])
 
     def test_rejects_reference_without_statistically_active_flux(self):
         reference_input = self._diffusion_reference_input()
@@ -294,6 +304,41 @@ class MultiGroupSphTests(unittest.TestCase):
                 spacing=self.spacing,
                 settings=SphSettings(maximum_relative_std_dev=0.5),
             )
+
+    def test_builds_normalized_reference_with_uncertainty_mask(self):
+        reference = build_sph_reference(
+            self.diffusion_input,
+            SphSettings(maximum_relative_std_dev=0.015),
+        )
+
+        self.assertEqual(
+            reference.flux.shape,
+            (
+                len(reference.region_labels),
+                self.diffusion_input.group_count,
+            ),
+        )
+        self.assertTrue(np.all(reference.flux >= 0.0))
+        self.assertTrue(np.any(reference.active))
+        self.assertFalse(reference.flux.flags.writeable)
+        self.assertFalse(reference.active.flags.writeable)
+
+    def test_rejects_zero_reference_fission_production(self):
+        reference_input = self._diffusion_reference_input()
+        zero_fission_regions = {
+            label: replace(
+                region,
+                nu_fission=np.zeros_like(region.nu_fission),
+            )
+            for label, region in reference_input.regions.items()
+        }
+        reference_input = replace(
+            reference_input,
+            regions=zero_fission_regions,
+        )
+
+        with self.assertRaisesRegex(ValueError, "zero fission production"):
+            build_sph_reference(reference_input)
 
     def test_identical_mesh_qualifies(self):
         report = qualify_mesh(
