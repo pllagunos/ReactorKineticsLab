@@ -38,9 +38,8 @@ _REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 _DEFAULT_EXPORT_DIR = (
     _REPOSITORY_ROOT
     / "openmc"
-    / "build"
+    / "reference_data"
     / "concentric"
-    / "mgxs_export"
     / "group_sweep"
     / "group_4"
 )

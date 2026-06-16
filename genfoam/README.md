@@ -7,7 +7,8 @@ concentric OpenMC reactor.
 
 - OpenFOAM and foamForNuclear available in the shell
 - the `openmc` Conda environment with OpenMC, Gmsh, and `MultiGroupXS`
-- an OpenMC model export under `openmc/build/concentric/mgxs_export/`
+- the tracked four-group OpenMC publication under
+  `openmc/reference_data/concentric/group_sweep/group_4/`
 
 Run Python commands from the repository root with the `openmc` environment
 active, or use `conda run -n openmc` as shown below.
@@ -34,8 +35,8 @@ cd genfoam
 ```
 
 Without particle-count overrides, `--rerun-mgxs` reuses the run settings
-recorded in the source export. The current 16-group source records 20,000
-particles, 100 batches, and 10 inactive batches.
+recorded in the source export. The current four-group publication records
+20,000 particles, 100 batches, and 10 inactive batches.
 
 Once a compatible MGXS export exists, preparation can reuse it without an
 OpenMC run:

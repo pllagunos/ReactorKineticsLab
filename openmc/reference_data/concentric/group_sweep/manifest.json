@@ -1,0 +1,118 @@
+{
+  "generated_utc": "2026-06-12T13:33:15.995505Z",
+  "group_counts": [
+    2,
+    4
+  ],
+  "groups": [
+    {
+      "continuous_energy": {
+        "keff": {
+          "mean": 1.00107889674524,
+          "std_dev": 0.0005933564724500801
+        },
+        "reactivity_pcm": 107.77339815550425
+      },
+      "energy_group_edges_ev": [
+        0.0,
+        0.625,
+        20000000.0
+      ],
+      "files": {
+        "mgxs_constants": {
+          "bytes": 696128,
+          "path": "group_2/outputs/mgxs_constants.json",
+          "sha256": "7e1774daa48e63b8ba92eee1269ab30093f072acd74d3006e6fe70cca14f221f"
+        },
+        "model_xml": {
+          "bytes": 12902,
+          "path": "group_2/reactor_run/model.xml",
+          "sha256": "2651cbe564c9678d923802f96f341f2a16f68301463968c0db985ea1eff3b7e5"
+        }
+      },
+      "group_count": 2,
+      "legendre_order": 0,
+      "multigroup_validation": {
+        "keff": {
+          "mean": 1.0096227789764165,
+          "std_dev": 0.0005386677774739572
+        },
+        "reactivity_pcm": 953.1063657430889,
+        "settings": {
+          "apply_domain_chi": false,
+          "batches": 50,
+          "group_count": 2,
+          "inactive": 10,
+          "max_order": 0,
+          "particles": 16000,
+          "scatter_correction": "P0",
+          "scatter_matrix_type": "consistent nu-scatter matrix",
+          "temperature": {
+            "default": 294.0,
+            "method": "nearest",
+            "tolerance": 1000000.0
+          },
+          "threads": 19
+        }
+      },
+      "scatter_correction": null,
+      "validation_scatter_correction": "P0"
+    },
+    {
+      "continuous_energy": {
+        "keff": {
+          "mean": 1.0010788967452418,
+          "std_dev": 0.0005933564724647889
+        },
+        "reactivity_pcm": 107.7733981556815
+      },
+      "energy_group_edges_ev": [
+        0.0,
+        0.625,
+        5530.0,
+        821000.0,
+        20000000.0
+      ],
+      "files": {
+        "mgxs_constants": {
+          "bytes": 1113504,
+          "path": "group_4/outputs/mgxs_constants.json",
+          "sha256": "2a3c7b47406fa48483891574e2f31208e5cee452a6c6c892679a91c7d177669d"
+        },
+        "model_xml": {
+          "bytes": 12934,
+          "path": "group_4/reactor_run/model.xml",
+          "sha256": "f80f68db9a2f330d1ea9d382732318ba5e853c505cb6dc63706a2183f6ef7d84"
+        }
+      },
+      "group_count": 4,
+      "legendre_order": 0,
+      "multigroup_validation": {
+        "keff": {
+          "mean": 1.0070849186653537,
+          "std_dev": 0.0007045771725968584
+        },
+        "reactivity_pcm": 703.5075726030129,
+        "settings": {
+          "apply_domain_chi": false,
+          "batches": 50,
+          "group_count": 4,
+          "inactive": 10,
+          "max_order": 0,
+          "particles": 16000,
+          "scatter_correction": "P0",
+          "scatter_matrix_type": "consistent nu-scatter matrix",
+          "temperature": {
+            "default": 294.0,
+            "method": "nearest",
+            "tolerance": 1000000.0
+          },
+          "threads": 19
+        }
+      },
+      "scatter_correction": null,
+      "validation_scatter_correction": "P0"
+    }
+  ],
+  "schema_version": 1
+}

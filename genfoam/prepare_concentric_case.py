@@ -28,7 +28,14 @@ from openmc_to_genfoam_xs import (
 
 CASE_DIR = Path(__file__).resolve().parent
 PROJECT_DIR = CASE_DIR.parent
-DEFAULT_MGXS_EXPORT_DIR = PROJECT_DIR / "openmc" / "build" / "concentric" / "mgxs_export"
+DEFAULT_MGXS_EXPORT_DIR = (
+    PROJECT_DIR
+    / "openmc"
+    / "reference_data"
+    / "concentric"
+    / "group_sweep"
+    / "group_4"
+)
 DEFAULT_OUTPUT_DIR = CASE_DIR / "constant" / "generated"
 CM_TO_M = 1.0e-2
 EV_TO_J = 1.602176487e-19

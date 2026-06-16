@@ -1,10 +1,17 @@
 from __future__ import annotations
 
+import json
+import tempfile
 import unittest
+from pathlib import Path
 
 import openmc
 
-from mgxs_export import MGXSExportConfig, attach_mgxs_tallies
+from mgxs_export import (
+    MGXSExportConfig,
+    attach_mgxs_tallies,
+    publish_group_sweep,
+)
 
 
 def _model() -> openmc.Model:
@@ -102,6 +109,141 @@ class MGXSExportContractTests(unittest.TestCase):
             metadata["auxiliary_tallies"]["power_mesh"]["axial_bins"],
             5,
         )
+
+    def test_publishes_portable_group_sweep_with_manifest(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            raw_root = root / "build" / "group_sweep"
+            published_root = root / "reference_data" / "group_sweep"
+            group_root = raw_root / "group_4"
+            source_json = group_root / "outputs" / "mgxs_constants.json"
+            source_model = group_root / "reactor_run" / "model.xml"
+            validation_json = (
+                group_root
+                / "mg_mode_validation"
+                / "validation_results.json"
+            )
+            source_json.parent.mkdir(parents=True)
+            source_model.parent.mkdir(parents=True)
+            validation_json.parent.mkdir(parents=True)
+            export = {
+                "config": {
+                    "energy_group_edges_ev": [0.0, 1.0, 2.0, 3.0, 4.0],
+                    "legendre_order": 0,
+                    "scatter_correction": None,
+                    "validation_scatter_correction": "P0",
+                },
+                "run": {
+                    "keff": {"mean": 1.001, "std_dev": 0.0001},
+                    "reactivity_pcm": 99.9,
+                },
+            }
+            source_json.write_text(
+                json.dumps(export),
+                encoding="utf-8",
+            )
+            source_model.write_text("<model/>\n", encoding="utf-8")
+            validation_json.write_text(
+                json.dumps(
+                    {
+                        "settings": {
+                            "group_count": 4,
+                            "scatter_correction": "P0",
+                        },
+                        "run": {
+                            "keff": {"mean": 1.0009, "std_dev": 0.0002},
+                            "reactivity_pcm": 89.9,
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            result = publish_group_sweep(
+                raw_root,
+                published_root,
+                group_counts=(4,),
+            )
+
+            self.assertEqual(result["group_counts"], (4,))
+            published_json = (
+                published_root
+                / "group_4"
+                / "outputs"
+                / "mgxs_constants.json"
+            )
+            published_model = (
+                published_root / "group_4" / "reactor_run" / "model.xml"
+            )
+            self.assertEqual(
+                published_json.read_bytes(),
+                source_json.read_bytes(),
+            )
+            self.assertEqual(
+                published_model.read_bytes(),
+                source_model.read_bytes(),
+            )
+            manifest = json.loads(
+                (published_root / "manifest.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertEqual(manifest["group_counts"], [4])
+            group = manifest["groups"][0]
+            self.assertEqual(group["group_count"], 4)
+            self.assertEqual(
+                group["multigroup_validation"]["keff"]["mean"],
+                1.0009,
+            )
+            for metadata in group["files"].values():
+                self.assertEqual(len(metadata["sha256"]), 64)
+                self.assertGreater(metadata["bytes"], 0)
+
+    def test_failed_publication_preserves_existing_reference(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            raw_root = root / "build" / "group_sweep"
+            published_root = root / "reference_data" / "group_sweep"
+            published_root.mkdir(parents=True)
+            sentinel = published_root / "sentinel.txt"
+            sentinel.write_text("keep\n", encoding="utf-8")
+            source_json = (
+                raw_root
+                / "group_4"
+                / "outputs"
+                / "mgxs_constants.json"
+            )
+            source_model = (
+                raw_root / "group_4" / "reactor_run" / "model.xml"
+            )
+            source_json.parent.mkdir(parents=True)
+            source_model.parent.mkdir(parents=True)
+            source_json.write_text(
+                json.dumps(
+                    {
+                        "config": {
+                            "energy_group_edges_ev": [0.0, 1.0, 2.0],
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            source_model.write_text("<model/>\n", encoding="utf-8")
+
+            with self.assertRaisesRegex(
+                ValueError,
+                "contains a 2-group",
+            ):
+                publish_group_sweep(
+                    raw_root,
+                    published_root,
+                    group_counts=(4,),
+                )
+
+            self.assertEqual(
+                sentinel.read_text(encoding="utf-8"),
+                "keep\n",
+            )
 
 
 if __name__ == "__main__":

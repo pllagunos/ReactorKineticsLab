@@ -162,10 +162,11 @@ history, source fingerprint, mesh, algorithm version, and provisional status.
 A factor file is rejected when its MGXS JSON, XML geometry, mesh, or algorithm
 version no longer matches.
 
-The existing four-group export cannot yet be fitted: it predates the raw CE
-reference payload and its CE `k_eff` standard deviation is 59.34 pcm. A final
-qualification run requires a regenerated export with uncertainty at or below
-15 pcm and the new flux and power tallies.
+The tracked two- and four-group development exports contain the raw CE
+region/group flux and cylindrical power payloads. Their CE `k_eff` uncertainty
+is about 59 pcm, so they can exercise the SPH workflow but cannot qualify a
+production factor set. Final qualification still requires a regenerated
+reference with uncertainty at or below 15 pcm.
 
 ## Persistent Cache
 
@@ -221,7 +222,7 @@ A final factor set is qualified only when:
 Until those conditions are met, the web page reports the result as
 provisional rather than treating the calculation as a calibrated surrogate.
 
-# Results
+# Results multigroup diffusion w/o SPH
 | Groups | MG OpenMC error vs CE | Diffusion error vs CE | Approx. diffusion bias vs MG |
 | -----: | --------------------: | --------------------: | ---------------------------: |
 |      1 |             +1908 pcm |             +1800 pcm |                     −108 pcm |
@@ -232,3 +233,12 @@ provisional rather than treating the calculation as a calibrated surrogate.
 
 These values are the uncorrected baseline. They are retained to show the
 group-condensation trend and are not SPH qualification results.
+
+# Inspiration
+
+On the use of the SPH method in nodal diffusion analyses of SFR cores - 10.1016/j.anucene.2015.06.007
+
+- Regions for SPH
+- Reactivity feedbacks
+- Reflector boundary conditions
+- Discontinuity factors
