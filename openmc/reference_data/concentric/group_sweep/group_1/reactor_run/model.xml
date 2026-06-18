@@ -109,20 +109,17 @@
       <z_grid>-150.0 -147.0 -144.0 -141.0 -138.0 -135.0 -132.0 -129.0 -126.0 -123.0 -120.0 -117.0 -114.0 -111.0 -108.0 -105.0 -102.0 -99.0 -96.0 -93.0 -90.0 -87.0 -84.0 -81.0 -78.0 -75.0 -72.0 -69.0 -66.0 -63.0 -60.0 -57.0 -54.0 -51.0 -48.0 -45.0 -42.0 -39.0 -36.0 -33.0 -30.0 -27.0 -24.0 -21.0 -18.0 -15.0 -12.0 -9.0 -6.0 -3.0 0.0 3.0 6.0 9.0 12.0 15.0 18.0 21.0 24.0 27.0 30.0 33.0 36.0 39.0 42.0 45.0 48.0 51.0 54.0 57.0 60.0 63.0 66.0 69.0 72.0 75.0 78.0 81.0 84.0 87.0 90.0 93.0 96.0 99.0 102.0 105.0 108.0 111.0 114.0 117.0 120.0 123.0 126.0 129.0 132.0 135.0 138.0 141.0 144.0 147.0 150.0</z_grid>
       <origin>0.0 0.0 0.0</origin>
     </mesh>
-    <filter id="1649" type="cell">
+    <filter id="1707" type="cell">
       <bins>66 67 68 69 70 71 72 73 74 75 77 78</bins>
     </filter>
     <filter id="2" type="energy">
-      <bins>0.0 0.625 20000000.0</bins>
+      <bins>0.0 20000000.0</bins>
     </filter>
     <filter id="7" type="energyout">
-      <bins>0.0 0.625 20000000.0</bins>
+      <bins>0.0 20000000.0</bins>
     </filter>
     <filter id="8" type="legendre">
       <order>1</order>
-    </filter>
-    <filter id="21" type="energy">
-      <bins>0.0 20000000.0</bins>
     </filter>
     <filter id="28" type="legendre">
       <order>0</order>
@@ -130,172 +127,160 @@
     <filter id="1652" type="delayedgroup">
       <bins>1 2 3 4 5 6</bins>
     </filter>
-    <filter id="1814" type="universe">
+    <filter id="1815" type="universe">
       <bins>12</bins>
     </filter>
-    <filter id="1817" type="cell">
+    <filter id="1818" type="cell">
       <bins>74</bins>
     </filter>
-    <filter id="1818" type="cell">
+    <filter id="1819" type="cell">
       <bins>66</bins>
     </filter>
-    <filter id="1819" type="cell">
+    <filter id="1820" type="cell">
       <bins>67</bins>
     </filter>
-    <filter id="1820" type="cell">
+    <filter id="1821" type="cell">
       <bins>68</bins>
     </filter>
-    <filter id="1821" type="cell">
+    <filter id="1822" type="cell">
       <bins>69</bins>
     </filter>
-    <filter id="1822" type="cell">
+    <filter id="1823" type="cell">
       <bins>70</bins>
     </filter>
-    <filter id="1823" type="cell">
+    <filter id="1824" type="cell">
       <bins>71</bins>
     </filter>
-    <filter id="1824" type="cell">
+    <filter id="1825" type="cell">
       <bins>72</bins>
     </filter>
-    <filter id="1825" type="cell">
+    <filter id="1826" type="cell">
       <bins>73</bins>
     </filter>
-    <filter id="1826" type="cell">
+    <filter id="1827" type="cell">
       <bins>75</bins>
     </filter>
-    <filter id="1827" type="cell">
+    <filter id="1828" type="cell">
       <bins>77</bins>
     </filter>
-    <filter id="1828" type="cell">
+    <filter id="1829" type="cell">
       <bins>78</bins>
     </filter>
-    <filter id="1832" type="mesh">
+    <filter id="1833" type="mesh">
       <bins>1</bins>
     </filter>
-    <tally id="1579" name="region-mgxs-canonical">
-      <filters>1649 2</filters>
+    <tally id="1626" name="region-mgxs-canonical">
+      <filters>1707 2</filters>
       <nuclides>total</nuclides>
       <scores>flux total absorption nu-fission kappa-fission scatter inverse-velocity</scores>
       <estimator>tracklength</estimator>
     </tally>
+    <tally id="1674" name="region-mgxs-canonical">
+      <filters>1707 2</filters>
+      <nuclides>total</nuclides>
+      <scores>flux nu-fission prompt-nu-fission delayed-nu-fission</scores>
+      <estimator>analog</estimator>
+    </tally>
     <tally id="1575" name="region-mgxs-canonical">
-      <filters>1649 2</filters>
-      <nuclides>total</nuclides>
-      <scores>flux</scores>
-      <estimator>analog</estimator>
-    </tally>
-    <tally id="1574" name="region-mgxs-canonical">
-      <filters>1649 7 8</filters>
+      <filters>1707 7 8</filters>
       <nuclides>total</nuclides>
       <scores>scatter nu-scatter</scores>
       <estimator>analog</estimator>
     </tally>
-    <tally id="1672" name="region-mgxs-canonical">
-      <filters>1649 21</filters>
+    <tally id="1675" name="region-mgxs-canonical">
+      <filters>1707 7</filters>
       <nuclides>total</nuclides>
       <scores>nu-fission prompt-nu-fission delayed-nu-fission</scores>
-      <estimator>analog</estimator>
-    </tally>
-    <tally id="1673" name="region-mgxs-canonical">
-      <filters>1649 7</filters>
-      <nuclides>total</nuclides>
-      <scores>nu-fission prompt-nu-fission delayed-nu-fission</scores>
-      <estimator>analog</estimator>
-    </tally>
-    <tally id="1572" name="region-mgxs-canonical">
-      <filters>1649 2 7 28</filters>
-      <nuclides>total</nuclides>
-      <scores>scatter nu-scatter</scores>
       <estimator>analog</estimator>
     </tally>
     <tally id="1573" name="region-mgxs-canonical">
-      <filters>1649 2 7</filters>
+      <filters>1707 2 7 28</filters>
+      <nuclides>total</nuclides>
+      <scores>scatter nu-scatter</scores>
+      <estimator>analog</estimator>
+    </tally>
+    <tally id="1574" name="region-mgxs-canonical">
+      <filters>1707 2 7</filters>
       <nuclides>total</nuclides>
       <scores>nu-scatter</scores>
       <estimator>analog</estimator>
     </tally>
-    <tally id="1624" name="core_central_moderator_channel-beta">
-      <filters>1649 21</filters>
-      <nuclides>total</nuclides>
-      <scores>nu-fission</scores>
-      <estimator>tracklength</estimator>
-    </tally>
-    <tally id="1625" name="core_central_moderator_channel-beta">
-      <filters>1649 1652 21</filters>
+    <tally id="1627" name="core_central_moderator_channel-beta">
+      <filters>1707 1652 2</filters>
       <nuclides>total</nuclides>
       <scores>delayed-nu-fission</scores>
       <estimator>tracklength</estimator>
     </tally>
-    <tally id="1720" name="core_central_moderator_channel-decay-rate">
-      <filters>1649 1652</filters>
+    <tally id="1722" name="core_central_moderator_channel-decay-rate">
+      <filters>1707 1652</filters>
       <nuclides>total</nuclides>
       <scores>delayed-nu-fission decay-rate</scores>
       <estimator>tracklength</estimator>
     </tally>
-    <tally id="1723" name="master-decay-rate">
-      <filters>1814 1652</filters>
+    <tally id="1725" name="master-decay-rate">
+      <filters>1815 1652</filters>
       <nuclides>total</nuclides>
       <scores>delayed-nu-fission decay-rate</scores>
       <estimator>tracklength</estimator>
     </tally>
-    <tally id="1724" name="core_central_moderator_channel-integral-flux">
-      <filters>2 1817</filters>
-      <scores>flux</scores>
-    </tally>
-    <tally id="1725" name="core_fuel_ring_1-integral-flux">
+    <tally id="1726" name="core_central_moderator_channel-integral-flux">
       <filters>2 1818</filters>
       <scores>flux</scores>
     </tally>
-    <tally id="1726" name="core_fuel_ring_2-integral-flux">
+    <tally id="1727" name="core_fuel_ring_1-integral-flux">
       <filters>2 1819</filters>
       <scores>flux</scores>
     </tally>
-    <tally id="1727" name="core_fuel_ring_3-integral-flux">
+    <tally id="1728" name="core_fuel_ring_2-integral-flux">
       <filters>2 1820</filters>
       <scores>flux</scores>
     </tally>
-    <tally id="1728" name="core_fuel_ring_4-integral-flux">
+    <tally id="1729" name="core_fuel_ring_3-integral-flux">
       <filters>2 1821</filters>
       <scores>flux</scores>
     </tally>
-    <tally id="1729" name="core_fuel_ring_5-integral-flux">
+    <tally id="1730" name="core_fuel_ring_4-integral-flux">
       <filters>2 1822</filters>
       <scores>flux</scores>
     </tally>
-    <tally id="1730" name="core_fuel_ring_6-integral-flux">
+    <tally id="1731" name="core_fuel_ring_5-integral-flux">
       <filters>2 1823</filters>
       <scores>flux</scores>
     </tally>
-    <tally id="1731" name="core_fuel_ring_7-integral-flux">
+    <tally id="1732" name="core_fuel_ring_6-integral-flux">
       <filters>2 1824</filters>
       <scores>flux</scores>
     </tally>
-    <tally id="1732" name="core_control_rod-integral-flux">
+    <tally id="1733" name="core_fuel_ring_7-integral-flux">
       <filters>2 1825</filters>
       <scores>flux</scores>
     </tally>
-    <tally id="1733" name="core_heavy_water_coolant_and_moderator-integral-flux">
+    <tally id="1734" name="core_control_rod-integral-flux">
       <filters>2 1826</filters>
       <scores>flux</scores>
     </tally>
-    <tally id="1734" name="moderator-integral-flux">
+    <tally id="1735" name="core_heavy_water_coolant_and_moderator-integral-flux">
       <filters>2 1827</filters>
       <scores>flux</scores>
     </tally>
-    <tally id="1735" name="reflector-integral-flux">
+    <tally id="1736" name="moderator-integral-flux">
       <filters>2 1828</filters>
       <scores>flux</scores>
     </tally>
-    <tally id="1736" name="master-integral-flux">
-      <filters>2 1814</filters>
+    <tally id="1737" name="reflector-integral-flux">
+      <filters>2 1829</filters>
       <scores>flux</scores>
     </tally>
-    <tally id="1737" name="prompt-generation-time">
-      <filters>21 1814</filters>
+    <tally id="1738" name="master-integral-flux">
+      <filters>2 1815</filters>
+      <scores>flux</scores>
+    </tally>
+    <tally id="1739" name="prompt-generation-time">
+      <filters>2 1815</filters>
       <scores>inverse-velocity</scores>
     </tally>
-    <tally id="1738" name="reference-kappa-fission-mesh">
-      <filters>1832</filters>
+    <tally id="1740" name="reference-kappa-fission-mesh">
+      <filters>1833</filters>
       <scores>kappa-fission</scores>
     </tally>
   </tallies>

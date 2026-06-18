@@ -72,7 +72,7 @@ def _build_mesh_tally(
 ) -> openmc.Tally:
     tally = openmc.Tally(name=name)
     tally.filters = [openmc.MeshFilter(mesh)]
-    tally.scores = ["flux", "fission", "nu-fission"]
+    tally.scores = ["flux", "fission", "nu-fission", "kappa-fission"]
     return tally
 
 
