@@ -4,7 +4,7 @@ model ResearchReactorThermalHydraulics
                         -> outlet plenum -> pump -> HX primary pipe -> inlet plenum.
   The reactor pool is represented as an open thermal reservoir coupled to the
   primary loop only through heat transfer; it is not hydraulically connected.
-  Primary-loop pressure compliance is provided by a separate expansion tank.
+  The inlet plenum is modeled as an open expansion volume that provides the loop pressure reference.
    Secondary side: fixed-temperature heat sink at 20 degC, UA = 1.33 MW/K.
    Architecture reference: ReactorKineticsLab/theory/ThermalHydraulics.tex"
 
@@ -20,6 +20,13 @@ model ResearchReactorThermalHydraulics
     "Core inlet temperature at nominal [K]  (25 degC)";
   parameter Modelica.Units.SI.Temperature T_out_nom = 318.15
     "Core outlet temperature at nominal [K] (45 degC)";
+  parameter Modelica.Units.SI.Temperature T_core_in_start = 300.675
+    "Nominal steady-state core inlet temperature used for initialization [K]";
+  parameter Modelica.Units.SI.Temperature T_core_out_start = 320.854
+    "Nominal steady-state core outlet temperature used for initialization [K]";
+  final parameter Modelica.Units.SI.Temperature T_core_avg_start =
+    0.5 * (T_core_in_start + T_core_out_start)
+    "Nominal steady-state core-average coolant temperature used for initialization [K]";
   parameter Modelica.Units.SI.Temperature T_sec_fixed = 293.15
     "Secondary heat-sink temperature [K]    (20 degC)";
   parameter Modelica.Units.SI.ThermalConductance UA_hx = 1.333e6
@@ -36,34 +43,125 @@ model ResearchReactorThermalHydraulics
     "Lumped thermal coupling between inlet plenum and reactor pool [W/K]";
   parameter Modelica.Units.SI.ThermalConductance G_pool_ambient = 2.0e4
     "Lumped ambient heat-loss conductance from the open pool [W/K]";
+  parameter Modelica.Units.SI.Height inletPlenumHeight = 2.0
+    "Open expansion-plenum height used for pressure reference [m]";
+  parameter Modelica.Units.SI.Height inletPlenumLevel_start = 1.0
+    "Initial open expansion-plenum level [m]";
+  parameter Modelica.Units.SI.Area inletPlenumCrossArea = 4.0 / inletPlenumLevel_start
+    "Open expansion-plenum cross-sectional area preserving the previous 4 m3 inventory [m2]";
+  parameter Modelica.Units.SI.AbsolutePressure inletPlenumSurfacePressure = 3.90e5
+    "Expansion-plenum surface pressure; plus hydrostatic head gives about 4 bar at ports [Pa]";
+  parameter Integer nFuelRadialNodes(min = 2) = 5
+    "Radial nodes in the fuel-meat half-slab heat structure";
+  parameter Integer fuelRingCount(min = 1) = 6
+    "OpenMC concentric fuel-ring count used for aggregated slab volume";
+  parameter Modelica.Units.SI.Length fuelRingThickness = 0.005
+    "OpenMC concentric fuel-ring thickness [m]";
+  parameter Modelica.Units.SI.Length fuelCoolantGap = 0.07
+    "OpenMC concentric coolant gap between fuel rings [m]";
+  parameter Modelica.Units.SI.Length fuelInnerRadius = 0.045
+    "OpenMC concentric element inner radius [m]";
+  parameter Modelica.Units.SI.Length fuelOuterRadius = 0.50
+    "OpenMC concentric element outer radius [m]";
+  parameter Modelica.Units.SI.Length fuelActiveHeight = 1.5
+    "OpenMC concentric active fuel height [m]";
+  parameter Modelica.Units.SI.Density fuelDensity = 12200
+    "Fuel meat density used for heat-structure capacity [kg/m3]";
+  parameter Modelica.Units.SI.SpecificHeatCapacity fuelSpecificHeatCapacity = 116
+    "Fuel meat specific heat capacity [J/(kg.K)]";
+  parameter Modelica.Units.SI.ThermalConductivity fuelThermalConductivity = 27
+    "Fuel meat thermal conductivity [W/(m.K)]";
+  parameter Modelica.Units.SI.CoefficientOfHeatTransfer h_core = 2.0e4
+    "Fixed fuel-wall to coolant heat-transfer coefficient [W/(m2.K)]";
+  parameter Modelica.Units.SI.Length coreHydraulicDiameter = 0.5
+    "Effective single-channel hydraulic diameter retained for loop pressure-drop calibration [m]";
+  parameter Modelica.Units.SI.Temperature T_fuel_start =
+    T_core_avg_start +
+    (P_nominal / nAxialNodes / fuelAxialNodeArea) *
+    (1 / h_core + fuelHalfThickness / (3 * fuelThermalConductivity))
+    "Nominal steady-state fuel-average temperature used for initialization [K]";
+
+  final parameter Modelica.Units.SI.Length fuelRadialSpan =
+    fuelRingCount * fuelRingThickness + (fuelRingCount - 1) * fuelCoolantGap
+    "Total radial span occupied by concentric fuel rings and coolant gaps";
+  final parameter Modelica.Units.SI.Length fuelEdgeGap =
+    0.5 * ((fuelOuterRadius - fuelInnerRadius) - fuelRadialSpan)
+    "Unused radial edge gap in the OpenMC concentric element";
+  final parameter Modelica.Units.SI.Radius fuelRingInnerRadii[fuelRingCount] =
+    {fuelInnerRadius + fuelEdgeGap + (i - 1) * (fuelRingThickness + fuelCoolantGap)
+      for i in 1:fuelRingCount}
+    "Inner radii of the concentric fuel rings";
+  final parameter Modelica.Units.SI.Area fuelCrossSectionArea =
+    Modelica.Constants.pi *
+    sum((fuelRingInnerRadii[i] + fuelRingThickness)^2 - fuelRingInnerRadii[i]^2
+      for i in 1:fuelRingCount)
+    "Total concentric fuel-meat cross-section area";
+  final parameter Modelica.Units.SI.Volume fuelVolume =
+    fuelCrossSectionArea * fuelActiveHeight
+    "Aggregated fuel-meat volume represented by the slab";
+  final parameter Modelica.Units.SI.Mass fuelMass =
+    fuelDensity * fuelVolume
+    "Aggregated fuel-meat mass represented by the slab";
+  final parameter Modelica.Units.SI.Length fuelHalfThickness =
+    0.5 * fuelRingThickness
+    "Fuel-meat half thickness from symmetry plane to coolant interface";
+  final parameter Modelica.Units.SI.Length fuelRadialCellWidth =
+    fuelHalfThickness / nFuelRadialNodes
+    "Radial width of each solid finite-volume node";
+  final parameter Modelica.Units.SI.Area fuelHeatTransferArea =
+    fuelVolume / fuelHalfThickness
+    "Two-sided slab-equivalent fuel heat-transfer area";
+  final parameter Modelica.Units.SI.Area fuelAxialNodeArea =
+    fuelHeatTransferArea / nAxialNodes
+    "Fuel heat-transfer area assigned to each axial coolant node";
+  final parameter Modelica.Units.SI.Volume fuelNodeVolume =
+    fuelVolume / (nAxialNodes * nFuelRadialNodes)
+    "Fuel volume assigned to each axial/radial solid node";
+  final parameter Modelica.Units.SI.HeatCapacity fuelNodeHeatCapacity =
+    fuelDensity * fuelSpecificHeatCapacity * fuelNodeVolume
+    "Heat capacity assigned to each solid node";
+  final parameter Modelica.Units.SI.ThermalConductance fuelInternalConductance =
+    fuelThermalConductivity * fuelAxialNodeArea / fuelRadialCellWidth
+    "Conductance between adjacent radial fuel-node centers";
+  final parameter Modelica.Units.SI.ThermalConductance fuelWallConductance =
+    2 * fuelThermalConductivity * fuelAxialNodeArea / fuelRadialCellWidth
+    "Half-cell conductance from the outer fuel-node center to the wall";
+  final parameter Modelica.Units.SI.ThermalConductance fuelConvectiveConductance =
+    h_core * fuelAxialNodeArea
+    "Fuel wall-to-coolant convective conductance per axial node";
 
   replaceable package Medium =
     Modelica.Media.CompressibleLiquids.LinearWater_pT_Ambient constrainedby
     Modelica.Media.Interfaces.PartialMedium
     "Primary coolant (water approximation for D2O; substitute once D2O package available)";
 
-  // ── System ────────────────────────────────────────────────────────────────
+// ── System ────────────────────────────────────────────────────────────────
   inner Modelica.Fluid.System system(
     p_start   = 4.0e5,
-    T_start   = T_in_nom,
+    T_start   = T_core_in_start,
     m_flow_start = m_flow_nominal,
     m_flow_small = 1.0,
     energyDynamics = Modelica.Fluid.Types.Dynamics.FixedInitial,
     massDynamics = Modelica.Fluid.Types.Dynamics.DynamicFreeInitial)
     annotation(Placement(transformation(origin = {150, 4}, extent = {{-90, 70}, {-70, 90}})));
 
-  // ── Inlet plenum (top of core; acts as closed-loop pressure reference) ────
-  Modelica.Fluid.Vessels.ClosedVolume inletPlenum(
+// ── Inlet plenum / expansion volume (top of core pressure reference) ────
+  Modelica.Fluid.Vessels.OpenTank inletPlenum(
     redeclare package Medium = Medium,
-    V           = 4.0,
-    nPorts      = 3,
+    height      = inletPlenumHeight,
+    crossArea   = inletPlenumCrossArea,
+    level_start = inletPlenumLevel_start,
+    nPorts      = 2,
     use_portsData = false,
     use_HeatTransfer = true,
-    p_start     = 4.0e5,
-    T_start     = T_in_nom)
+    p_ambient   = inletPlenumSurfacePressure,
+    T_start     = T_core_in_start,
+    T_ambient   = system.T_ambient,
+    massDynamics = Modelica.Fluid.Types.Dynamics.FixedInitial,
+    ports_H_flow(each min = -2.0e8, each max = 2.0e8))
     annotation(Placement(transformation(origin = {8, 26}, extent = {{-24, 36}, {-12, 48}})));
 
-  // ── Reactor pool (thermal reservoir only; no hydraulic coupling) ─────────
+// ── Reactor pool (thermal reservoir only; no hydraulic coupling) ─────────
   Modelica.Fluid.Vessels.OpenTank poolInventory(
     redeclare package Medium = Medium,
     height      = poolHeight,
@@ -71,20 +169,9 @@ model ResearchReactorThermalHydraulics
     level_start = poolLevel_start,
     nPorts      = 0,
     use_HeatTransfer = true,
-    T_start     = T_in_nom,
+    T_start     = T_core_in_start,
     T_ambient   = system.T_ambient)
     annotation(Placement(transformation(origin = {64.8333, -101.667}, extent = {{-138.833, 141.667}, {-104.833, 175.667}})));
-
-  // ── Pressure reference for the primary loop ──────────────────────────────
-  //   This keeps the cooling circuit independent of the pool while avoiding
-  //   the unrealistically high absolute pressures produced by a fully sealed
-  //   liquid-only loop model.
-  Modelica.Fluid.Sources.Boundary_pT pressureBoundary(
-    redeclare package Medium = Medium,
-    nPorts      = 1,
-    p           = system.p_start,
-    T           = T_in_nom)
-    annotation(Placement(transformation(origin = {7.2, 23.6}, extent = {{-43.2, 32.4}, {-31.2, 44.4}})));
 
   Modelica.Thermal.HeatTransfer.Components.ThermalConductor poolMixing(
     G = G_pool_mix)
@@ -98,19 +185,20 @@ model ResearchReactorThermalHydraulics
     T = system.T_ambient)
     annotation(Placement(transformation(origin = {14, -70}, extent = {{-110, 70}, {-94, 86}})));
 
-  // ── Effective core channel (top -> bottom, nAxialNodes cells) ─────────────
+// ── Effective core channel (top -> bottom, nAxialNodes cells) ─────────────
   //   A single axially-discretised pipe represents the entire active-core
-  //   flow path.  Diameter and length are scaled so that the hydraulic
-  //   residence time and heat capacity are representative of the annular
-  //   fuel+inner-moderator region.  modelStructure = av_vb is required for
+  //   flow path.  The active length follows the OpenMC concentric fuel element;
+  //   the diameter remains an effective hydraulic calibration parameter rather
+  //   than the 1.2 m fuel-envelope outer diameter.
+  //   modelStructure = av_vb is required for
   //   nAxialNodes > 1 to avoid the regFun3 co-monotone interpolation failure.
   Modelica.Fluid.Pipes.DynamicPipe core(
     redeclare package Medium = Medium,
     use_T_start  = true,
-    T_start      = T_in_nom,
+    T_start      = T_core_avg_start,
     m_flow_start = m_flow_nominal,
-    length       = 6.912,
-    diameter     = 0.5,
+    length       = fuelActiveHeight,
+    diameter     = coreHydraulicDiameter,
     nNodes       = nAxialNodes,
     use_HeatTransfer = true,
     redeclare model HeatTransfer =
@@ -124,17 +212,18 @@ model ResearchReactorThermalHydraulics
     p_b_start  = 3.999e5,
     state_a(p(start = 4.0e5)),
     state_b(p(start = 3.999e5)),
-    statesFM(each p(start = 3.9995e5)))
+    statesFM(each p(start = 3.9995e5)),
+    H_flows(each min = -2.0e8, each max = 2.0e8))
     annotation(Placement(transformation(origin = {-66, -60}, extent = {{-76, 38}, {-38, 76}}, rotation = -90)));
 
-  // ── Outlet plenum (bottom of core) ────────────────────────────────────────
+// ── Outlet plenum (bottom of core) ────────────────────────────────────────
   Modelica.Fluid.Vessels.ClosedVolume outletPlenum(
     redeclare package Medium = Medium,
     V           = 4.0,
     nPorts      = 2,
     use_portsData = false,
     p_start     = 3.999e5,
-    T_start     = T_out_nom)
+    T_start     = T_core_out_start)
     annotation(Placement(transformation(origin = {12, -84}, extent = {{-28, 14}, {-14, -0}}, rotation = -0)));
 
   Modelica.Fluid.Pipes.StaticPipe inletPipe(
@@ -164,14 +253,14 @@ model ResearchReactorThermalHydraulics
     m_flow_start = m_flow_nominal)
     annotation(Placement(transformation(origin = {14, -60}, extent = {{-8, -20}, {10, 0}})));
 
-  // ── Primary pump (flow-controlled: imposes m_flow = m_flow_nominal) ───────
+// ── Primary pump (flow-controlled: imposes m_flow = m_flow_nominal) ───────
   //   Use control_m_flow = true for first-pass thermal studies.
   //   Replace with head-curve pump for loss-of-flow / coastdown transients.
   Modelica.Fluid.Machines.ControlledPump pump(
     redeclare package Medium = Medium,
     N_nominal    = 1500,
     use_T_start  = true,
-    T_start      = T_out_nom,
+    T_start      = T_core_out_start,
     m_flow_start = m_flow_nominal,
     m_flow_nominal = m_flow_nominal,
     control_m_flow = true,
@@ -182,7 +271,7 @@ model ResearchReactorThermalHydraulics
     p_b_nominal = 4.1e5)
     annotation(Placement(transformation(origin = {18, -60}, extent = {{10, -20}, {30, 0}})));
 
-  // ── Mass-flow sensor (between pump outlet and HX inlet) ───────────────────
+// ── Mass-flow sensor (between pump outlet and HX inlet) ───────────────────
   Modelica.Fluid.Sensors.MassFlowRate sensor_m(
     redeclare package Medium = Medium)
     annotation(Placement(transformation(origin = {46, -83.1921}, extent = {{24.284, -11.8911}, {36.4261, 0}}, rotation = 90)));
@@ -196,13 +285,13 @@ model ResearchReactorThermalHydraulics
     m_flow_start = m_flow_nominal)
     annotation(Placement(transformation(origin = {80, -96}, extent = {{60, 18}, {80, 38}}, rotation = 90)));
 
-  // ── Primary-side HX pipe ──────────────────────────────────────────────────
+// ── Primary-side HX pipe ──────────────────────────────────────────────────
   //   Single-node DynamicPipe with IdealFlowHeatTransfer.  Heat is removed
   //   through the single heatPorts[1] connection via hxWall -> T_sec.
   Modelica.Fluid.Pipes.DynamicPipe hxPipe(
     redeclare package Medium = Medium,
     use_T_start  = true,
-    T_start      = 305.65,
+    T_start      = T_core_avg_start,
     m_flow_start = m_flow_nominal,
     length       = 8.0,
     diameter     = 0.4,
@@ -231,7 +320,7 @@ model ResearchReactorThermalHydraulics
     m_flow_start = m_flow_nominal)
     annotation(Placement(transformation(origin = {52, 132}, extent = {{18, 60}, {38, 80}}, rotation = 180)));
 
-  // ── HX thermal boundary (secondary side = fixed 20 degC heat sink) ────────
+// ── HX thermal boundary (secondary side = fixed 20 degC heat sink) ────────
   Modelica.Thermal.HeatTransfer.Components.ThermalConductor hxWall[nHxNodes](
     each G = UA_hx / nHxNodes)
     annotation(Placement(transformation(origin = {-26, -48}, extent = {{90, 60}, {110, 80}})));
@@ -240,11 +329,24 @@ model ResearchReactorThermalHydraulics
     T = T_sec_fixed)
     annotation(Placement(transformation(origin = {190, 112}, extent = {{126, 54}, {108, 72}}, rotation = 180)));
 
-  // ── Distributed core heat sources (driven by FMI input) ───────────────────
-  Modelica.Thermal.HeatTransfer.Sources.PrescribedHeatFlow coreHeat[nAxialNodes]
-    annotation(Placement(transformation(origin = {-76, -40}, extent = {{108, 24}, {84, 48}})));
+// ── RELAP-style fuel heat structure (half-slab -> coolant bulk) ───────────
+  Modelica.Thermal.HeatTransfer.Components.HeatCapacitor fuelNode[nAxialNodes, nFuelRadialNodes](
+    each C = fuelNodeHeatCapacity,
+    each T(start = T_fuel_start));
 
-  // ── Temperature sensors ───────────────────────────────────────────────────
+  Modelica.Thermal.HeatTransfer.Components.ThermalConductor fuelRadialConduction[
+    nAxialNodes, nFuelRadialNodes - 1](
+    each G = fuelInternalConductance);
+
+  Modelica.Thermal.HeatTransfer.Components.ThermalConductor fuelWallConduction[nAxialNodes](
+    each G = fuelWallConductance);
+
+  Modelica.Thermal.HeatTransfer.Components.Convection coreConvection[nAxialNodes];
+
+  Modelica.Thermal.HeatTransfer.Sources.PrescribedHeatFlow fuelHeat[
+    nAxialNodes, nFuelRadialNodes];
+
+// ── Temperature sensors ───────────────────────────────────────────────────
   Modelica.Fluid.Sensors.Temperature sensor_T_in(
     redeclare package Medium = Medium)
     annotation(Placement(transformation(origin = {8, -8}, extent = {{-48, 30}, {-36, 40}})));
@@ -253,7 +355,7 @@ model ResearchReactorThermalHydraulics
     redeclare package Medium = Medium)
     annotation(Placement(transformation(origin = {8, -20}, extent = {{-48, -10}, {-36, 0}})));
 
-  // ── Pressure sensors (for core pressure-drop output) ──────────────────────
+// ── Pressure sensors (for core pressure-drop output) ──────────────────────
   Modelica.Fluid.Sensors.Pressure sensor_p_in(
     redeclare package Medium = Medium)
     annotation(Placement(transformation(origin = {18, -14}, extent = {{-6, 36}, {6, 48}})));
@@ -262,7 +364,7 @@ model ResearchReactorThermalHydraulics
     redeclare package Medium = Medium)
     annotation(Placement(transformation(origin = {18, -20}, extent = {{-6, -12}, {6, 0}})));
 
-  // ── FMI inputs ────────────────────────────────────────────────────────────
+// ── FMI inputs ────────────────────────────────────────────────────────────
   Modelica.Blocks.Interfaces.RealInput totalPower(
     unit  = "W",
     min   = 0,
@@ -275,18 +377,31 @@ model ResearchReactorThermalHydraulics
     each start = 1.0 / nAxialNodes)
     annotation(Placement(transformation(origin = {38, -58}, extent = {{-130, -10}, {-110, 10}}), iconTransformation(extent = {{-130, -10}, {-110, 10}})));
 
-  // ── FMI outputs ───────────────────────────────────────────────────────────
+// ── FMI outputs ───────────────────────────────────────────────────────────
   Modelica.Blocks.Interfaces.RealOutput T_inlet(unit = "K")
-    annotation(Placement(transformation(origin = {-32, -94}, extent = {{110, 70}, {130, 90}}), iconTransformation(extent = {{110, 70}, {130, 90}})));
+    annotation(Placement(transformation(origin = {-8, -28}, extent = {{110, 70}, {130, 90}}), iconTransformation(extent = {{110, 70}, {130, 90}})));
 
   Modelica.Blocks.Interfaces.RealOutput T_outlet(unit = "K")
-    annotation(Placement(transformation(origin = {-32, -94}, extent = {{110, 50}, {130, 70}}), iconTransformation(extent = {{110, 50}, {130, 70}})));
+    annotation(Placement(transformation(origin = {-8, -28}, extent = {{110, 50}, {130, 70}}), iconTransformation(extent = {{110, 50}, {130, 70}})));
 
   Modelica.Blocks.Interfaces.RealOutput massFlow(unit = "kg/s")
-    annotation(Placement(transformation(origin = {-32, -94}, extent = {{110, 30}, {130, 50}}), iconTransformation(extent = {{110, 30}, {130, 50}})));
+    annotation(Placement(transformation(origin = {-8, -28}, extent = {{110, 30}, {130, 50}}), iconTransformation(extent = {{110, 30}, {130, 50}})));
 
   Modelica.Blocks.Interfaces.RealOutput dp_core(unit = "Pa")
-    annotation(Placement(transformation(origin = {-32, -96}, extent = {{110, 10}, {130, 30}}), iconTransformation(extent = {{110, 10}, {130, 30}})));
+    annotation(Placement(transformation(origin = {-8, -30}, extent = {{110, 10}, {130, 30}}), iconTransformation(extent = {{110, 10}, {130, 30}})));
+
+  Modelica.Blocks.Interfaces.RealOutput T_fuelCenterlineMax(unit = "K")
+    annotation(Placement(transformation(origin = {-8, -30}, extent = {{110, -10}, {130, 10}}), iconTransformation(extent = {{110, -10}, {130, 10}})));
+
+  Modelica.Blocks.Interfaces.RealOutput T_fuelWallMax(unit = "K")
+    annotation(Placement(transformation(origin = {-8, -30}, extent = {{110, -30}, {130, -10}}), iconTransformation(extent = {{110, -30}, {130, -10}})));
+
+  Modelica.Blocks.Interfaces.RealOutput T_fuelEff(unit = "K")
+    annotation(Placement(transformation(origin = {-8, -30}, extent = {{110, -50}, {130, -30}}), iconTransformation(extent = {{110, -50}, {130, -30}})));
+
+  Modelica.Blocks.Interfaces.RealOutput T_moderatorEff(unit = "K")
+    annotation(Placement(transformation(origin = {-8, -30}, extent = {{110, -70}, {130, -50}}), iconTransformation(extent = {{110, -70}, {130, -50}})));
+
 
 protected
   Real positiveFractions[nAxialNodes](each unit = "1");
@@ -296,6 +411,10 @@ protected
 
 equation
   assert(totalPower >= 0, "totalPower must be non-negative");
+  assert(fuelOuterRadius > fuelInnerRadius,
+    "fuelOuterRadius must be larger than fuelInnerRadius");
+  assert(fuelEdgeGap >= 0,
+    "OpenMC concentric fuel rings do not fit between fuelInnerRadius and fuelOuterRadius");
 
   for i in 1:nAxialNodes loop
     assert(axialPowerFractions[i] >= 0,
@@ -310,14 +429,34 @@ equation
     normalizedFractions[i] = if fractionSum > 1e-9 then
       positiveFractions[i] / fractionSum else 1.0 / nAxialNodes;
     nodeHeatFlow[i] = totalPower * normalizedFractions[i];
-    coreHeat[i].Q_flow = nodeHeatFlow[i];
-    connect(coreHeat[i].port, core.heatPorts[i]);
+
+    for r in 1:nFuelRadialNodes loop
+      fuelHeat[i, r].Q_flow = nodeHeatFlow[i] / nFuelRadialNodes;
+      connect(fuelHeat[i, r].port, fuelNode[i, r].port);
+    end for;
+    // No inward connection on radial node 1: zero heat flux at the symmetry plane.
+    for r in 1:(nFuelRadialNodes - 1) loop
+      connect(fuelNode[i, r].port, fuelRadialConduction[i, r].port_a);
+      connect(fuelRadialConduction[i, r].port_b, fuelNode[i, r + 1].port);
+    end for;
+
+    connect(fuelNode[i, nFuelRadialNodes].port, fuelWallConduction[i].port_a);
+    connect(fuelWallConduction[i].port_b, coreConvection[i].solid);
+    coreConvection[i].Gc = fuelConvectiveConductance;
+    connect(coreConvection[i].fluid, core.heatPorts[i]);
   end for;
 
   T_inlet  = sensor_T_in.T;
   T_outlet = sensor_T_out.T;
   massFlow = sensor_m.m_flow;
   dp_core  = sensor_p_in.p - sensor_p_out.p;
+  T_fuelCenterlineMax = max({fuelNode[i, 1].T for i in 1:nAxialNodes});
+  T_fuelWallMax = max({fuelWallConduction[i].port_b.T for i in 1:nAxialNodes});
+  T_fuelEff = sum({normalizedFractions[i] *
+    sum({fuelNode[i, r].T for r in 1:nFuelRadialNodes}) / nFuelRadialNodes
+    for i in 1:nAxialNodes});
+  T_moderatorEff = sum({normalizedFractions[i] * core.heatPorts[i].T
+    for i in 1:nAxialNodes});
 // ── Primary loop fluid connections ────────────────────────────────────────
   connect(core.port_b, outletPipe.port_a) annotation(
     Line(points = {{-9, -22}, {-9, -34}}, color = {0, 127, 255}));
@@ -333,22 +472,19 @@ equation
     annotation(Line(points = {{52, 36}, {52, 62}, {34, 62}}, color = {0, 127, 255}));
   connect(returnPipe.port_b, inletPlenum.ports[1]) annotation(
     Line(points = {{14, 62}, {-10, 62}}, color = {0, 127, 255}));
-  connect( inletPlenum.ports[2], pressureBoundary.ports[1]) annotation(
-    Line(points = {{-10, 62}, {-24, 62}}, color = {0, 127, 255}));
 // ── Sensor port taps (zero-flow connections to existing fluid nodes) ───────
   connect(poolInventory.heatPort, poolAmbientLoss.port_a) annotation(
     Line(points = {{-74, 57}, {-96, 57}, {-96, 35}, {-92, 35}}, color = {191, 0, 0}));
   connect(poolAmbientLoss.port_b, ambientPoolBoundary.port)
     annotation(Line(points = {{-78, 35}, {-78, 35.5}, {-70, 35.5}, {-70, 7.375}, {-80, 7.375}, {-80, 8}}, color = {191, 0, 0}));
-
-  // ── HX thermal path ───────────────────────────────────────────────────────
+// ── HX thermal path ───────────────────────────────────────────────────────
   for i in 1:nHxNodes loop
     connect(hxPipe.heatPorts[i], hxWall[i].port_a);
     connect(hxWall[i].port_b, T_sec.port);
   end for;
   connect(poolMixing.port_a, poolInventory.heatPort) annotation(
     Line(points = {{-34, 89}, {-74, 89}, {-74, 57}}, color = {191, 0, 0}));
-  connect(inletPipe.port_a, inletPlenum.ports[3]) annotation(
+  connect(inletPipe.port_a, inletPlenum.ports[2]) annotation(
     Line(points = {{-10, 55}, {-10, 62}}, color = {0, 127, 255}));
   connect(inletPlenum.heatPort, poolMixing.port_b) annotation(
     Line(points = {{-16, 68}, {-20, 68}, {-20, 89}, {-24, 89}}, color = {191, 0, 0}));
@@ -366,8 +502,6 @@ equation
     Line(points = {{48, -70}, {52, -70}, {52, -59}}, color = {0, 127, 255}));
   connect(sensor_m.port_b, pumpToHxPipe.port_a) annotation(
     Line(points = {{52, -46}, {52, -36}}, color = {0, 127, 255}));
-  connect(coreHeat.port, core.heatPorts) annotation(
-    Line(points = {{8, -4}, {0, -4}}, color = {191, 0, 0}, thickness = 0.5));
   connect(hxWall.port_a, hxPipe.heatPorts) annotation(
     Line(points = {{64, 22}, {58, 22}}, color = {191, 0, 0}, thickness = 0.5));
   annotation(
@@ -385,8 +519,8 @@ D<sub>2</sub>O primary loop).  Architecture specified in
 <li>The reactor pool is modeled as an open thermal reservoir coupled to the
   inlet plenum only through heat transfer. It is not hydraulically connected
   to the primary loop.</li>
-<li>A separate fixed-pressure boundary provides the primary-loop pressure
-  reference without conflating the pool with the sealed cooling circuit.</li>
+<li>The inlet plenum is an open expansion volume that provides the
+  primary-loop pressure reference without hydraulically connecting the pool.</li>
 <li>Design operating point: 25&nbsp;&deg;C inlet, 45&nbsp;&deg;C outlet,
   237&nbsp;kg/s, ~4&nbsp;bar absolute system pressure.</li>
 <li>Flow-controlled pump (constant 237&nbsp;kg/s).  Replace
@@ -394,13 +528,21 @@ D<sub>2</sub>O primary loop).  Architecture specified in
     loss-of-flow transient studies.</li>
 <li>Secondary side: fixed 20&nbsp;&deg;C thermal boundary with
   UA = 1.333&nbsp;MW/K distributed across <code>nHxNodes</code> cells.</li>
+<li>Core heat is deposited in a 5-node fuel-meat half-slab heat structure
+  derived from the OpenMC concentric ring defaults.  Heat conducts from the
+  fuel centerline symmetry plane to a convective wall coupled to each axial
+  coolant node.</li>
 </ul>
 <p>
 <b>FMI inputs:</b> <code>totalPower</code>&nbsp;[W],
 <code>axialPowerFractions[n]</code><br/>
 <b>FMI outputs:</b> <code>T_inlet</code>&nbsp;[K],
 <code>T_outlet</code>&nbsp;[K], <code>massFlow</code>&nbsp;[kg/s],
-<code>dp_core</code>&nbsp;[Pa]
+<code>dp_core</code>&nbsp;[Pa],
+<code>T_fuelCenterlineMax</code>&nbsp;[K],
+<code>T_fuelWallMax</code>&nbsp;[K],
+<code>T_fuelEff</code>&nbsp;[K],
+<code>T_moderatorEff</code>&nbsp;[K]
 </p>
 </html>"),
     experiment(StopTime = 6000, Interval = 5.0, Tolerance = 1e-6),
