@@ -1,0 +1,158 @@
+<?xml version='1.0' encoding='utf-8'?>
+<model>
+  <materials>
+    <cross_sections>/home/pablo/modelica/repo-codex-a/openmc/reference_data/concentric/group_sweep/group_4/mg_mode_validation_with_flux/mgxs.h5</cross_sections>
+    <material id="1" name="set1">
+      <density value="1.0" units="macro"/>
+      <macroscopic name="set1"/>
+    </material>
+    <material id="2" name="set2">
+      <density value="1.0" units="macro"/>
+      <macroscopic name="set2"/>
+    </material>
+    <material id="3" name="set3">
+      <density value="1.0" units="macro"/>
+      <macroscopic name="set3"/>
+    </material>
+    <material id="4" name="set4">
+      <density value="1.0" units="macro"/>
+      <macroscopic name="set4"/>
+    </material>
+    <material id="5" name="set5">
+      <density value="1.0" units="macro"/>
+      <macroscopic name="set5"/>
+    </material>
+    <material id="6" name="set6">
+      <density value="1.0" units="macro"/>
+      <macroscopic name="set6"/>
+    </material>
+    <material id="7" name="set7">
+      <density value="1.0" units="macro"/>
+      <macroscopic name="set7"/>
+    </material>
+    <material id="8" name="set8">
+      <density value="1.0" units="macro"/>
+      <macroscopic name="set8"/>
+    </material>
+    <material id="9" name="set9">
+      <density value="1.0" units="macro"/>
+      <macroscopic name="set9"/>
+    </material>
+    <material id="10" name="set10">
+      <density value="1.0" units="macro"/>
+      <macroscopic name="set10"/>
+    </material>
+    <material id="11" name="set11">
+      <density value="1.0" units="macro"/>
+      <macroscopic name="set11"/>
+    </material>
+    <material id="12" name="set12">
+      <density value="1.0" units="macro"/>
+      <macroscopic name="set12"/>
+    </material>
+  </materials>
+  <geometry>
+    <cell id="66" name="fuel_ring_1" material="2" region="158 -159 153 -154" temperature="600.0" universe="11"/>
+    <cell id="67" name="fuel_ring_2" material="3" region="160 -161 153 -154" temperature="600.0" universe="11"/>
+    <cell id="68" name="fuel_ring_3" material="4" region="162 -163 153 -154" temperature="600.0" universe="11"/>
+    <cell id="69" name="fuel_ring_4" material="5" region="164 -165 153 -154" temperature="600.0" universe="11"/>
+    <cell id="70" name="fuel_ring_5" material="6" region="166 -167 153 -154" temperature="600.0" universe="11"/>
+    <cell id="71" name="fuel_ring_6" material="7" region="168 -169 153 -154" temperature="600.0" universe="11"/>
+    <cell id="72" name="fuel_ring_7" material="8" region="170 -171 153 -154" temperature="600.0" universe="11"/>
+    <cell id="73" name="control_rod" material="9" region="-157 155 -152" temperature="300.0" universe="11"/>
+    <cell id="74" name="central_moderator_channel" material="1" region="-157 151 -155" temperature="300.0" universe="11"/>
+    <cell id="75" name="heavy_water_coolant_and_moderator" material="10" region="-156 151 -152 (-158 | 159 | -153 | 154) (-160 | 161 | -153 | 154) (-162 | 163 | -153 | 154) (-164 | 165 | -153 | 154) (-166 | 167 | -153 | 154) (-168 | 169 | -153 | 154) (-170 | 171 | -153 | 154) (157 | -155 | 152) (157 | -151 | 155)" temperature="300.0" universe="11"/>
+    <cell id="76" name="fuel_element" fill="11" region="-172 175 -176" universe="12"/>
+    <cell id="77" name="d2o_tank" material="11" region="-173 177 -178 (172 | -175 | 176)" temperature="300.0" universe="12"/>
+    <cell id="78" name="h2o_tank" material="12" region="-174 179 -180 (173 | -177 | 178)" temperature="300.0" universe="12"/>
+    <surface id="151" type="z-plane" coeffs="-200.0"/>
+    <surface id="152" type="z-plane" coeffs="200.0"/>
+    <surface id="153" type="z-plane" coeffs="-150.0"/>
+    <surface id="154" type="z-plane" coeffs="150.0"/>
+    <surface id="155" type="z-plane" coeffs="150.0"/>
+    <surface id="156" type="z-cylinder" coeffs="0.0 0.0 50.0"/>
+    <surface id="157" type="z-cylinder" coeffs="0.0 0.0 4.0"/>
+    <surface id="158" type="z-cylinder" coeffs="0.0 0.0 4.5"/>
+    <surface id="159" type="z-cylinder" coeffs="0.0 0.0 5.0"/>
+    <surface id="160" type="z-cylinder" coeffs="0.0 0.0 12.0"/>
+    <surface id="161" type="z-cylinder" coeffs="0.0 0.0 12.5"/>
+    <surface id="162" type="z-cylinder" coeffs="0.0 0.0 19.5"/>
+    <surface id="163" type="z-cylinder" coeffs="0.0 0.0 20.0"/>
+    <surface id="164" type="z-cylinder" coeffs="0.0 0.0 27.0"/>
+    <surface id="165" type="z-cylinder" coeffs="0.0 0.0 27.5"/>
+    <surface id="166" type="z-cylinder" coeffs="0.0 0.0 34.5"/>
+    <surface id="167" type="z-cylinder" coeffs="0.0 0.0 35.0"/>
+    <surface id="168" type="z-cylinder" coeffs="0.0 0.0 42.0"/>
+    <surface id="169" type="z-cylinder" coeffs="0.0 0.0 42.5"/>
+    <surface id="170" type="z-cylinder" coeffs="0.0 0.0 49.5"/>
+    <surface id="171" type="z-cylinder" coeffs="0.0 0.0 50.0"/>
+    <surface id="172" type="z-cylinder" coeffs="0.0 0.0 50.0"/>
+    <surface id="173" type="z-cylinder" coeffs="0.0 0.0 250.0"/>
+    <surface id="174" type="z-cylinder" boundary="vacuum" coeffs="0.0 0.0 500.0"/>
+    <surface id="175" type="z-plane" coeffs="-200.0"/>
+    <surface id="176" type="z-plane" coeffs="200.0"/>
+    <surface id="177" type="z-plane" coeffs="-300.0"/>
+    <surface id="178" type="z-plane" coeffs="300.0"/>
+    <surface id="179" type="z-plane" boundary="vacuum" coeffs="-500.0"/>
+    <surface id="180" type="z-plane" boundary="vacuum" coeffs="500.0"/>
+  </geometry>
+  <settings>
+    <run_mode>eigenvalue</run_mode>
+    <particles>40000</particles>
+    <batches>100</batches>
+    <inactive>20</inactive>
+    <source type="independent" strength="1.0" particle="neutron">
+      <space type="cylindrical" origin="0.0 0.0 0.0">
+        <r type="powerlaw" parameters="4.5 50.0 1.0"/>
+        <phi type="uniform" parameters="0.0 6.283185307179586"/>
+        <z type="uniform" parameters="-150.0 150.0"/>
+      </space>
+      <constraints>
+        <fissionable>true</fissionable>
+      </constraints>
+    </source>
+    <output>
+      <summary>false</summary>
+    </output>
+    <energy_mode>multi-group</energy_mode>
+    <max_order>0</max_order>
+    <entropy_mesh>10</entropy_mesh>
+    <mesh id="10">
+      <dimension>7 7 21</dimension>
+      <lower_left>-50.0 -50.0 -150.0</lower_left>
+      <upper_right>50.0 50.0 150.0</upper_right>
+    </mesh>
+    <temperature_default>294.0</temperature_default>
+    <temperature_method>nearest</temperature_method>
+    <temperature_tolerance>1000000.0</temperature_tolerance>
+    <source_rejection_fraction>0.01</source_rejection_fraction>
+  </settings>
+  <tallies>
+    <mesh id="5" type="cylindrical">
+      <r_grid>0.0 3.125 6.25 9.375 12.5 15.625 18.75 21.875 25.0 28.125 31.25 34.375 37.5 40.625 43.75 46.875 50.0 53.125 56.25 59.375 62.5 65.625 68.75 71.875 75.0 78.125 81.25 84.375 87.5 90.625 93.75 96.875 100.0 103.125 106.25 109.375 112.5 115.625 118.75 121.875 125.0 128.125 131.25 134.375 137.5 140.625 143.75 146.875 150.0 153.125 156.25 159.375 162.5 165.625 168.75 171.875 175.0 178.125 181.25 184.375 187.5 190.625 193.75 196.875 200.0 203.125 206.25 209.375 212.5 215.625 218.75 221.875 225.0 228.125 231.25 234.375 237.5 240.625 243.75 246.875 250.0</r_grid>
+      <phi_grid>0.0 6.283185307179586</phi_grid>
+      <z_grid>-500.0 -487.5 -475.0 -462.5 -450.0 -437.5 -425.0 -412.5 -400.0 -387.5 -375.0 -362.5 -350.0 -337.5 -325.0 -312.5 -300.0 -287.5 -275.0 -262.5 -250.0 -237.5 -225.0 -212.5 -200.0 -187.5 -175.0 -162.5 -150.0 -137.5 -125.0 -112.5 -100.0 -87.5 -75.0 -62.5 -50.0 -37.5 -25.0 -12.5 0.0 12.5 25.0 37.5 50.0 62.5 75.0 87.5 100.0 112.5 125.0 137.5 150.0 162.5 175.0 187.5 200.0 212.5 225.0 237.5 250.0 262.5 275.0 287.5 300.0 312.5 325.0 337.5 350.0 362.5 375.0 387.5 400.0 412.5 425.0 437.5 450.0 462.5 475.0 487.5 500.0</z_grid>
+      <origin>0.0 0.0 0.0</origin>
+    </mesh>
+    <mesh id="6" type="cylindrical">
+      <r_grid>0.0 0.5 1.0 1.5 2.0 2.5 3.0 3.5 4.0 4.5 5.0 5.5 6.0 6.5 7.0 7.5 8.0 8.5 9.0 9.5 10.0 10.5 11.0 11.5 12.0 12.5 13.0 13.5 14.0 14.5 15.0 15.5 16.0 16.5 17.0 17.5 18.0 18.5 19.0 19.5 20.0 20.5 21.0 21.5 22.0 22.5 23.0 23.5 24.0 24.5 25.0 25.5 26.0 26.5 27.0 27.5 28.0 28.5 29.0 29.5 30.0 30.5 31.0 31.5 32.0 32.5 33.0 33.5 34.0 34.5 35.0 35.5 36.0 36.5 37.0 37.5 38.0 38.5 39.0 39.5 40.0 40.5 41.0 41.5 42.0 42.5 43.0 43.5 44.0 44.5 45.0 45.5 46.0 46.5 47.0 47.5 48.0 48.5 49.0 49.5 50.0</r_grid>
+      <phi_grid>0.0 6.283185307179586</phi_grid>
+      <z_grid>-150.0 -147.0 -144.0 -141.0 -138.0 -135.0 -132.0 -129.0 -126.0 -123.0 -120.0 -117.0 -114.0 -111.0 -108.0 -105.0 -102.0 -99.0 -96.0 -93.0 -90.0 -87.0 -84.0 -81.0 -78.0 -75.0 -72.0 -69.0 -66.0 -63.0 -60.0 -57.0 -54.0 -51.0 -48.0 -45.0 -42.0 -39.0 -36.0 -33.0 -30.0 -27.0 -24.0 -21.0 -18.0 -15.0 -12.0 -9.0 -6.0 -3.0 0.0 3.0 6.0 9.0 12.0 15.0 18.0 21.0 24.0 27.0 30.0 33.0 36.0 39.0 42.0 45.0 48.0 51.0 54.0 57.0 60.0 63.0 66.0 69.0 72.0 75.0 78.0 81.0 84.0 87.0 90.0 93.0 96.0 99.0 102.0 105.0 108.0 111.0 114.0 117.0 120.0 123.0 126.0 129.0 132.0 135.0 138.0 141.0 144.0 147.0 150.0</z_grid>
+      <origin>0.0 0.0 0.0</origin>
+    </mesh>
+    <filter id="1888" type="mesh">
+      <bins>5</bins>
+    </filter>
+    <filter id="1889" type="mesh">
+      <bins>6</bins>
+    </filter>
+    <tally id="2583" name="global-mesh-mg">
+      <filters>1888</filters>
+      <scores>flux fission nu-fission kappa-fission</scores>
+    </tally>
+    <tally id="2584" name="fuel-mesh-mg">
+      <filters>1889</filters>
+      <scores>flux fission nu-fission kappa-fission</scores>
+    </tally>
+  </tallies>
+</model>

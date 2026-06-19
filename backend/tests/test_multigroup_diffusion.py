@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import unittest
+from dataclasses import replace
 
 import numpy as np
 
 from reactor_backend.multigroup_diffusion import (
+    BOUNDARY_D2O_INTERFACE_VACUUM,
+    BOUNDARY_GROUPWISE_FVM,
     ConcentricMeshSpacing,
     CylindricalLayeredModel2D,
     CylindricalRegionZone2D,
@@ -102,6 +105,7 @@ def _model() -> CylindricalLayeredModel2D:
         core=fuel,
         moderator=moderator,
         reflector=reflector,
+        moderator_height=8.0,
         zones=zones,
     )
 
@@ -131,6 +135,72 @@ class MultiGroupDiffusionTests(unittest.TestCase):
             np.max(fuel_widths[(fuel_centers >= 1.0) & (fuel_centers <= 3.0)]),
             0.4 + 1.0e-12,
         )
+
+    def test_groupwise_fvm_boundary_uses_physical_reflector_extent(self):
+        model = replace(_model(), boundary_condition=BOUNDARY_GROUPWISE_FVM)
+        mesh = build_concentric_mesh(
+            model,
+            ConcentricMeshSpacing(
+                fuel_radial_cm=1.0,
+                core_coolant_radial_cm=1.0,
+                moderator_radial_cm=2.0,
+                reflector_radial_cm=2.0,
+                axial_cm=2.0,
+            ),
+        )
+        legacy_mesh = build_concentric_mesh(
+            _model(),
+            ConcentricMeshSpacing(
+                fuel_radial_cm=1.0,
+                core_coolant_radial_cm=1.0,
+                moderator_radial_cm=2.0,
+                reflector_radial_cm=2.0,
+                axial_cm=2.0,
+            ),
+        )
+
+        self.assertAlmostEqual(mesh.r_edges[-1], model.reflector_radius)
+        self.assertAlmostEqual(mesh.z_edges[0], -0.5 * model.outer_height)
+        self.assertAlmostEqual(mesh.z_edges[-1], 0.5 * model.outer_height)
+        self.assertLess(mesh.cell_count, legacy_mesh.cell_count)
+
+        system = build_multigroup_2d_system(model, mesh=mesh)
+        self.assertEqual(len(system.operators), model.group_count)
+        self.assertTrue(
+            all(operator.shape == (mesh.cell_count, mesh.cell_count)
+                for operator in system.operators)
+        )
+
+    def test_d2o_interface_vacuum_truncates_at_d2o_boundary(self):
+        model = replace(
+            _model(),
+            boundary_condition=BOUNDARY_D2O_INTERFACE_VACUUM,
+        )
+        mesh = build_concentric_mesh(
+            model,
+            ConcentricMeshSpacing(
+                fuel_radial_cm=1.0,
+                core_coolant_radial_cm=1.0,
+                moderator_radial_cm=2.0,
+                reflector_radial_cm=2.0,
+                axial_cm=2.0,
+            ),
+        )
+
+        self.assertAlmostEqual(mesh.r_edges[-1], model.moderator_radius)
+        self.assertAlmostEqual(mesh.z_edges[0], -0.5 * model.moderator_height)
+        self.assertAlmostEqual(mesh.z_edges[-1], 0.5 * model.moderator_height)
+
+        system = build_multigroup_2d_system(model, mesh=mesh)
+        self.assertEqual(system.cell_count, mesh.cell_count)
+        self.assertNotIn("reflector", {
+            system.region_labels[index]
+            for index in np.unique(system.region_index)
+        })
+
+    def test_rejects_unknown_boundary_condition(self):
+        with self.assertRaisesRegex(ValueError, "boundary_condition"):
+            replace(_model(), boundary_condition="not-a-mode")
 
     def test_matrix_free_fission_source_matches_global_matrix(self):
         system = build_multigroup_2d_system(

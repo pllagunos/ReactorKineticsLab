@@ -7,7 +7,11 @@ import argparse
 import json
 from pathlib import Path
 
-from reactor_backend.multigroup_diffusion import ConcentricMeshSpacing
+from reactor_backend.multigroup_diffusion import (
+    BOUNDARY_CONDITIONS,
+    BOUNDARY_EXTRAPOLATED_MESH,
+    ConcentricMeshSpacing,
+)
 from reactor_backend.multigroup_diffusion_cache import (
     DEFAULT_CACHE_ROOT,
     DiffusionCacheSettings,
@@ -17,6 +21,10 @@ from reactor_backend.openmc_mgxs_adapter import (
     load_concentric_diffusion_input,
 )
 from reactor_backend.multigroup_sph import (
+    REFERENCE_MODE_AXIAL_REGION_FLUX,
+    REFERENCE_MODE_AXIAL_POWER_SHAPE,
+    REFERENCE_MODE_REGION_FLUX,
+    SphSettings,
     fit_sph_factors,
     load_sph_factors,
     qualify_mesh,
@@ -74,6 +82,24 @@ def _parser() -> argparse.ArgumentParser:
         help="Apply an existing SPH factor file when preparing the cache",
     )
     parser.add_argument(
+        "--sph-reference-mode",
+        choices=(
+            REFERENCE_MODE_REGION_FLUX,
+            REFERENCE_MODE_AXIAL_POWER_SHAPE,
+            REFERENCE_MODE_AXIAL_REGION_FLUX,
+        ),
+        default=REFERENCE_MODE_REGION_FLUX,
+        help="Reference used when fitting new SPH factors",
+    )
+    parser.add_argument(
+        "--axial-sph-zones-json",
+        type=Path,
+        help=(
+            "JSON file containing the AXIAL_SPH_ZONES mapping for "
+            "axial SPH fitting"
+        ),
+    )
+    parser.add_argument(
         "--qualify-mesh",
         action="store_true",
         help=(
@@ -91,6 +117,16 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--moderator-dr", type=float, default=5.0)
     parser.add_argument("--reflector-dr", type=float, default=10.0)
     parser.add_argument("--dz", type=float, default=10.0)
+    parser.add_argument(
+        "--boundary-condition",
+        choices=BOUNDARY_CONDITIONS,
+        default=None,
+        help=(
+            "Diffusion vacuum-boundary treatment. The default preserves the "
+            "legacy extrapolated mesh, or uses the installed SPH factor "
+            "mode when --sph-factors is provided."
+        ),
+    )
     return parser
 
 
@@ -106,8 +142,22 @@ def main() -> int:
         axial_cm=args.dz,
     )
     factors = None
+    selected_boundary_condition = (
+        args.boundary_condition or BOUNDARY_EXTRAPOLATED_MESH
+    )
+    axial_sph_zones = None
+    if args.axial_sph_zones_json is not None:
+        axial_sph_zones = json.loads(
+            args.axial_sph_zones_json.read_text(encoding="utf-8")
+        )
     if args.sph_factors is not None:
+        if args.axial_sph_zones_json is not None:
+            raise ValueError(
+                "--axial-sph-zones-json is only used with --fit-sph"
+            )
         factors = load_sph_factors(args.sph_factors)
+        if args.boundary_condition is None:
+            selected_boundary_condition = factors.boundary_condition
         validate_sph_factors(
             diffusion_input,
             selected_spacing,
@@ -120,6 +170,11 @@ def main() -> int:
         fitted = fit_sph_factors(
             diffusion_input,
             spacing=selected_spacing,
+            settings=SphSettings(
+                boundary_condition=selected_boundary_condition
+            ),
+            reference_mode=args.sph_reference_mode,
+            axial_sph_zones=axial_sph_zones,
         )
         save_sph_factors(fitted.factors, args.fit_sph)
         factors = fitted.factors
@@ -151,7 +206,8 @@ def main() -> int:
         raise ValueError("--qualification-json requires --qualify-mesh")
     if args.prepare_cache:
         settings = DiffusionCacheSettings(
-            spacing=selected_spacing
+            spacing=selected_spacing,
+            boundary_condition=selected_boundary_condition,
         )
         prepared = prepare_concentric_diffusion_cache(
             diffusion_input,

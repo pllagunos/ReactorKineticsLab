@@ -6,7 +6,7 @@ import json
 import math
 import re
 import xml.etree.ElementTree as ET
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from collections.abc import Mapping
 from typing import Any
@@ -14,6 +14,7 @@ from typing import Any
 import numpy as np
 
 from .multigroup_diffusion import (
+    BOUNDARY_EXTRAPOLATED_MESH,
     CylindricalLayeredModel2D,
     CylindricalRegionZone2D,
     MultiGroupRegion,
@@ -610,6 +611,7 @@ class ContinuousEnergyReference:
     region_flux: dict[str, ReferenceValues]
     master_flux: ReferenceValues
     power_mesh: PowerMeshReference | None
+    axial_region_flux: dict[str, ReferenceValues] = field(default_factory=dict)
 
 
 def _reference_values(
@@ -671,6 +673,20 @@ def _load_ce_reference(
         field_name="reference.master_flux",
     )
 
+    axial_payload = payload.get("axial_region_flux", {})
+    if axial_payload is None:
+        axial_payload = {}
+    if not isinstance(axial_payload, dict):
+        raise ValueError("reference.axial_region_flux must be an object")
+    axial_region_flux = {
+        str(label): _reference_values(
+            values,
+            group_count=group_count,
+            field_name=f"reference.axial_region_flux.{label}",
+        )
+        for label, values in axial_payload.items()
+    }
+
     power_payload = payload.get("power_mesh")
     power_mesh = None
     if power_payload is not None:
@@ -688,6 +704,7 @@ def _load_ce_reference(
         region_flux=region_flux,
         master_flux=master_flux,
         power_mesh=power_mesh,
+        axial_region_flux=axial_region_flux,
     )
 
 
@@ -719,6 +736,7 @@ class ConcentricDiffusionInput:
         delta_absorption_rod: float | np.ndarray = 0.0,
         *,
         regions: Mapping[str, MultiGroupRegion] | None = None,
+        boundary_condition: str = BOUNDARY_EXTRAPOLATED_MESH,
     ) -> CylindricalLayeredModel2D:
         selected_regions = dict(self.regions if regions is None else regions)
         if set(selected_regions) != set(self.regions):
@@ -745,8 +763,10 @@ class ConcentricDiffusionInput:
             core=core_reference,
             moderator=selected_regions["moderator"],
             reflector=selected_regions["reflector"],
+            moderator_height=self.geometry["moderator_height_cm"],
             rod_radius=self.geometry["rod_radius_cm"],
             delta_absorption_rod=delta_absorption_rod,
+            boundary_condition=boundary_condition,
             zones=corrected_zones,
         )
 
@@ -777,6 +797,9 @@ class ConcentricDiffusionInput:
                         "normalization": self.ce_reference.normalization,
                         "region_flux_labels": sorted(
                             self.ce_reference.region_flux
+                        ),
+                        "axial_region_flux_labels": sorted(
+                            self.ce_reference.axial_region_flux
                         ),
                         "power_mesh_present": (
                             self.ce_reference.power_mesh is not None

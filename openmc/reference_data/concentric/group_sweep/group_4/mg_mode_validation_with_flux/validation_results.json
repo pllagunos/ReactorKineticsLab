@@ -1,0 +1,290 @@
+{
+  "energy_mode": "multi-group",
+  "files": {
+    "geometry_xml": "/home/pablo/modelica/repo-codex-a/openmc/reference_data/concentric/group_sweep/group_4/mg_mode_validation_with_flux/geometry.xml",
+    "materials_xml": "/home/pablo/modelica/repo-codex-a/openmc/reference_data/concentric/group_sweep/group_4/mg_mode_validation_with_flux/materials.xml",
+    "mgxs_hdf5": "/home/pablo/modelica/repo-codex-a/openmc/reference_data/concentric/group_sweep/group_4/mg_mode_validation_with_flux/mgxs.h5",
+    "model_xml": "/home/pablo/modelica/repo-codex-a/openmc/reference_data/concentric/group_sweep/group_4/mg_mode_validation_with_flux/model.xml",
+    "settings_xml": "/home/pablo/modelica/repo-codex-a/openmc/reference_data/concentric/group_sweep/group_4/mg_mode_validation_with_flux/settings.xml",
+    "statepoint": "/home/pablo/modelica/repo-codex-a/openmc/reference_data/concentric/group_sweep/group_4/mg_mode_validation_with_flux/statepoint.100.h5"
+  },
+  "mgxs_hdf5_path": "/home/pablo/modelica/repo-codex-a/openmc/reference_data/concentric/group_sweep/group_4/mg_mode_validation_with_flux/mgxs.h5",
+  "model": {
+    "available_cells": [
+      "central_moderator_channel",
+      "control_rod",
+      "d2o_tank",
+      "fuel_element",
+      "fuel_ring_1",
+      "fuel_ring_2",
+      "fuel_ring_3",
+      "fuel_ring_4",
+      "fuel_ring_5",
+      "fuel_ring_6",
+      "fuel_ring_7",
+      "h2o_tank",
+      "heavy_water_coolant_and_moderator"
+    ],
+    "cell_count": 13,
+    "configured_run": {
+      "batches": 100,
+      "delayed_groups": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6
+      ],
+      "domain_definitions": [
+        [
+          "core_central_moderator_channel",
+          "central_moderator_channel"
+        ],
+        [
+          "core_fuel_ring_1",
+          "fuel_ring_1"
+        ],
+        [
+          "core_fuel_ring_2",
+          "fuel_ring_2"
+        ],
+        [
+          "core_fuel_ring_3",
+          "fuel_ring_3"
+        ],
+        [
+          "core_fuel_ring_4",
+          "fuel_ring_4"
+        ],
+        [
+          "core_fuel_ring_5",
+          "fuel_ring_5"
+        ],
+        [
+          "core_fuel_ring_6",
+          "fuel_ring_6"
+        ],
+        [
+          "core_fuel_ring_7",
+          "fuel_ring_7"
+        ],
+        [
+          "core_control_rod",
+          "control_rod"
+        ],
+        [
+          "core_heavy_water_coolant_and_moderator",
+          "heavy_water_coolant_and_moderator"
+        ],
+        [
+          "moderator",
+          "d2o_tank"
+        ],
+        [
+          "reflector",
+          "h2o_tank"
+        ]
+      ],
+      "energy_group_edges_ev": [
+        0.0,
+        0.625,
+        5530.0,
+        821000.0,
+        20000000.0
+      ],
+      "group_count": 4,
+      "inactive": 10,
+      "kinetics_group_count": 1,
+      "legendre_order": 0,
+      "mgxs_types": [
+        "total",
+        "transport",
+        "absorption",
+        "diffusion-coefficient",
+        "nu-fission",
+        "kappa-fission",
+        "chi",
+        "chi-prompt",
+        "scatter matrix",
+        "consistent scatter matrix",
+        "nu-scatter matrix",
+        "consistent nu-scatter matrix",
+        "inverse-velocity"
+      ],
+      "particles": 200000,
+      "scatter_correction": null,
+      "scattering_moment": "P0",
+      "validation_scatter_correction": "P0"
+    },
+    "domains": {
+      "core_central_moderator_channel": {
+        "cell_name": "central_moderator_channel",
+        "present": true
+      },
+      "core_control_rod": {
+        "cell_name": "control_rod",
+        "present": true
+      },
+      "core_fuel_ring_1": {
+        "cell_name": "fuel_ring_1",
+        "present": true
+      },
+      "core_fuel_ring_2": {
+        "cell_name": "fuel_ring_2",
+        "present": true
+      },
+      "core_fuel_ring_3": {
+        "cell_name": "fuel_ring_3",
+        "present": true
+      },
+      "core_fuel_ring_4": {
+        "cell_name": "fuel_ring_4",
+        "present": true
+      },
+      "core_fuel_ring_5": {
+        "cell_name": "fuel_ring_5",
+        "present": true
+      },
+      "core_fuel_ring_6": {
+        "cell_name": "fuel_ring_6",
+        "present": true
+      },
+      "core_fuel_ring_7": {
+        "cell_name": "fuel_ring_7",
+        "present": true
+      },
+      "core_heavy_water_coolant_and_moderator": {
+        "cell_name": "heavy_water_coolant_and_moderator",
+        "present": true
+      },
+      "moderator": {
+        "cell_name": "d2o_tank",
+        "present": true
+      },
+      "reflector": {
+        "cell_name": "h2o_tank",
+        "present": true
+      }
+    },
+    "mgxs_tallies": {
+      "auxiliary_tallies": {
+        "chi_delayed_domains": 12,
+        "integral_flux_domains": 12,
+        "master_flux": "master-integral-flux",
+        "power_mesh": {
+          "axial_bins": 100,
+          "name": "reference-kappa-fission-mesh",
+          "radial_bins": 100
+        },
+        "prompt_generation_time": "prompt-generation-time"
+      },
+      "canonical_scatter_correction": null,
+      "domains": {
+        "core_central_moderator_channel": {
+          "cell_name": "central_moderator_channel",
+          "domain_id": 74
+        },
+        "core_control_rod": {
+          "cell_name": "control_rod",
+          "domain_id": 73
+        },
+        "core_fuel_ring_1": {
+          "cell_name": "fuel_ring_1",
+          "domain_id": 66
+        },
+        "core_fuel_ring_2": {
+          "cell_name": "fuel_ring_2",
+          "domain_id": 67
+        },
+        "core_fuel_ring_3": {
+          "cell_name": "fuel_ring_3",
+          "domain_id": 68
+        },
+        "core_fuel_ring_4": {
+          "cell_name": "fuel_ring_4",
+          "domain_id": 69
+        },
+        "core_fuel_ring_5": {
+          "cell_name": "fuel_ring_5",
+          "domain_id": 70
+        },
+        "core_fuel_ring_6": {
+          "cell_name": "fuel_ring_6",
+          "domain_id": 71
+        },
+        "core_fuel_ring_7": {
+          "cell_name": "fuel_ring_7",
+          "domain_id": 72
+        },
+        "core_heavy_water_coolant_and_moderator": {
+          "cell_name": "heavy_water_coolant_and_moderator",
+          "domain_id": 75
+        },
+        "moderator": {
+          "cell_name": "d2o_tank",
+          "domain_id": 77
+        },
+        "reflector": {
+          "cell_name": "h2o_tank",
+          "domain_id": 78
+        }
+      },
+      "energy_groups": [
+        0.0,
+        0.625,
+        5530.0,
+        821000.0,
+        20000000.0
+      ],
+      "legendre_order": 0,
+      "scattering_moment": "P0",
+      "tally_count": 26,
+      "validation_scatter_correction": "P0",
+      "validation_scatter_types": [
+        "consistent scatter matrix",
+        "consistent nu-scatter matrix"
+      ]
+    },
+    "model_directory": "/home/pablo/modelica/repo-codex-a/openmc/reference_data/concentric/group_sweep/group_4/reactor_run",
+    "model_name": "reactor_run",
+    "model_xml_path": "/home/pablo/modelica/repo-codex-a/openmc/reference_data/concentric/group_sweep/group_4/reactor_run/model.xml",
+    "settings": {
+      "batches": 100,
+      "inactive": 10,
+      "particles": 200000,
+      "run_mode": "eigenvalue",
+      "source_present": true
+    },
+    "tally_cleanup": {
+      "removed_mesh": 1,
+      "retained_non_mesh": 25,
+      "total": 26
+    }
+  },
+  "run": {
+    "keff": {
+      "mean": 1.0050467102562082,
+      "std_dev": 0.00031467286045983836
+    },
+    "reactivity_pcm": 502.1368862469745
+  },
+  "settings": {
+    "apply_domain_chi": false,
+    "batches": 100,
+    "group_count": 4,
+    "inactive": 20,
+    "max_order": 0,
+    "particles": 40000,
+    "scatter_correction": "P0",
+    "scatter_matrix_type": "consistent nu-scatter matrix",
+    "temperature": {
+      "default": 294.0,
+      "method": "nearest",
+      "tolerance": 1000000.0
+    },
+    "threads": 19
+  },
+  "source_statepoint_path": "/home/pablo/modelica/repo-codex-a/openmc/build/concentric/mgxs_export/group_sweep/group_4/reactor_run/statepoint.100.h5",
+  "statepoint_path": "/home/pablo/modelica/repo-codex-a/openmc/reference_data/concentric/group_sweep/group_4/mg_mode_validation_with_flux/statepoint.100.h5"
+}

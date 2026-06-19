@@ -9,6 +9,7 @@ import openmc
 
 from mgxs_export import (
     MGXSExportConfig,
+    _validate_statepoint_domains,
     attach_mgxs_tallies,
     publish_group_sweep,
 )
@@ -37,6 +38,28 @@ def _bounded_fuel_model() -> openmc.Model:
 
 
 class MGXSExportContractTests(unittest.TestCase):
+    def test_statepoint_domain_check_rejects_mismatched_cell_ids(self):
+        class FakeSummary:
+            _fast_cells = {1: object()}
+
+        class FakeStatePoint:
+            summary = FakeSummary()
+
+        class FakeCell:
+            def __init__(self, cell_id: int):
+                self.id = cell_id
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "not a plain continuous-energy reactor statepoint",
+        ):
+            _validate_statepoint_domains(
+                FakeStatePoint(),
+                {"core_central_moderator_channel": FakeCell(74)},
+                statepoint_path=Path("/tmp/plain/statepoint.100.h5"),
+                model_xml_path=Path("/tmp/export/reactor_run/model.xml"),
+            )
+
     def test_canonical_and_validation_libraries_use_distinct_corrections(self):
         config = MGXSExportConfig(
             domain_definitions=(("test", "test_cell"),),

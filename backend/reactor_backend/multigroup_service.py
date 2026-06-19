@@ -10,6 +10,7 @@ from typing import Any
 import numpy as np
 
 from .multigroup_diffusion import (
+    BOUNDARY_EXTRAPOLATED_MESH,
     ConcentricMeshSpacing,
     _power_density,
     solve_multigroup_system,
@@ -105,6 +106,14 @@ class MultigroupDiffusionService:
             else None
         )
         spacing = _spacing_from_factors(factors)
+        boundary_condition = os.environ.get(
+            "MULTIGROUP_BOUNDARY_CONDITION",
+            (
+                factors.boundary_condition
+                if factors is not None
+                else BOUNDARY_EXTRAPOLATED_MESH
+            ),
+        )
         cache_root = Path(
             os.environ.get(
                 "MULTIGROUP_DIFFUSION_CACHE_DIR",
@@ -113,7 +122,10 @@ class MultigroupDiffusionService:
         )
         prepared = prepare_concentric_diffusion_cache(
             diffusion_input,
-            settings=DiffusionCacheSettings(spacing=spacing),
+            settings=DiffusionCacheSettings(
+                spacing=spacing,
+                boundary_condition=boundary_condition,
+            ),
             cache_root=cache_root,
             sph_factors=factors,
         )

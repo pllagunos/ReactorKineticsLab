@@ -252,6 +252,52 @@ class OpenMCMGXSAdapterTests(unittest.TestCase):
             "fast-to-thermal",
         )
         self.assertEqual(loaded.ce_reference.power_mesh.mean.shape, (2, 2))
+        self.assertEqual(loaded.ce_reference.axial_region_flux, {})
+
+    def test_loads_optional_axial_ce_flux_reference(self):
+        export = _export()
+        export["reference"]["axial_region_flux"] = {
+            "core_fuel_ring_1__axial_upper": {
+                "mean": [3.0, 4.0],
+                "std_dev": [0.03, 0.04],
+            }
+        }
+
+        loaded = self.load(export)
+
+        assert loaded.ce_reference is not None
+        np.testing.assert_allclose(
+            loaded.ce_reference.axial_region_flux[
+                "core_fuel_ring_1__axial_upper"
+            ].mean,
+            [3.0, 4.0],
+        )
+
+    def test_rejects_invalid_axial_ce_flux_reference(self):
+        malformed = _export()
+        malformed["reference"]["axial_region_flux"] = []
+        with self.assertRaisesRegex(ValueError, "axial_region_flux"):
+            self.load(malformed)
+
+        wrong_group_count = _export()
+        wrong_group_count["reference"]["axial_region_flux"] = {
+            "core_fuel_ring_1__axial_upper": {
+                "mean": [1.0],
+                "std_dev": [0.0],
+            }
+        }
+        with self.assertRaisesRegex(ValueError, "must contain 2 energy groups"):
+            self.load(wrong_group_count)
+
+        negative = _export()
+        negative["reference"]["axial_region_flux"] = {
+            "core_fuel_ring_1__axial_upper": {
+                "mean": [-1.0, 2.0],
+                "std_dev": [0.0, 0.0],
+            }
+        }
+        with self.assertRaisesRegex(ValueError, "non-negative"):
+            self.load(negative)
 
     def test_rejects_inconsistent_diffusion_coefficient(self):
         export = _export()
