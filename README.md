@@ -130,9 +130,10 @@ The current backend exposes:
 - `GET /api/multigroup-diffusion/state`
 - `POST /api/multigroup-diffusion/recompute`
 
-The multigroup page is clean-core only. It loads the persisted four-group
-solution immediately and solves again only on explicit recompute. Its export,
-factor, and cache locations can be overridden with
+The frontend Core page is the validated OpenMC-informed multigroup view. It
+uses the existing multigroup backend API, loads the persisted four-group
+solution immediately, and solves the current rod position again only on
+explicit recompute. Its export, factor, and cache locations can be overridden with
 `MULTIGROUP_MGXS_EXPORT_DIR`, `MULTIGROUP_SPH_FACTORS_PATH`, and
 `MULTIGROUP_DIFFUSION_CACHE_DIR`.
 

@@ -225,11 +225,14 @@ GET  /api/multigroup-diffusion/state
 POST /api/multigroup-diffusion/recompute
 ```
 
+The frontend exposes this validated OpenMC-informed result as the Core page.
+The API names remain `multigroup-diffusion` to avoid backend contract churn.
+
 Startup loads the persisted clean solution and corrected CSR operators when a
 matching factor artifact exists. A fresh solve runs only on explicit
 recompute. Missing factors produce a clearly marked uncorrected, provisional
-result. Rod position is not an input to this service; immediate rod behavior
-remains in point kinetics.
+result. The service reads the current rod insertion from the point-kinetics
+simulation state; reactivity itself remains in point kinetics.
 
 ## Qualification Criteria
 

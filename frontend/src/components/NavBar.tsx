@@ -18,18 +18,6 @@ export function NavBar() {
           >
             Core
           </NavLink>
-          <NavLink
-            to="/multigroup"
-            className={({ isActive }) => `nav-link${isActive ? ' nav-link--active' : ''}`}
-          >
-            Multigroup
-          </NavLink>
-          <NavLink
-            to="/transient"
-            className={({ isActive }) => `nav-link${isActive ? ' nav-link--active' : ''}`}
-          >
-            Transient
-          </NavLink>
         </div>
       </div>
     </nav>

@@ -85,47 +85,7 @@ export type SimulationState = {
 }
 
 // ---------------------------------------------------------------------------
-// Core page — diffusion flux response
-// ---------------------------------------------------------------------------
-
-export type CoreFluxGeometry = {
-  rInnerCm: number
-  rFuelCm: number
-  rReflCm: number
-  hActiveCm: number
-  hReflCm: number
-  rodRadiusCm: number
-}
-
-export type CoreFluxProfile = {
-  axisCm: number[]
-  phiNorm: number[]
-}
-
-export type CoreFluxMetadata = {
-  rodInsertionPercent: number
-  kEff: number
-  iterations: number
-  cached: boolean
-  meshDrCm: number
-  meshDzCm: number
-  displayNr: number
-  displayNz: number
-}
-
-export type CoreFluxResponse = {
-  heatmapRCm: number[]
-  heatmapZCm: number[]
-  /** heatmapPhi[i][j] = normalised flux at (r_i, z_j) in [0, 1] */
-  heatmapPhi: number[][]
-  radial: CoreFluxProfile
-  axial: CoreFluxProfile
-  geometry: CoreFluxGeometry
-  metadata: CoreFluxMetadata
-}
-
-// ---------------------------------------------------------------------------
-// Clean-core resolved multigroup diffusion page
+// Core page — resolved multigroup diffusion response
 // ---------------------------------------------------------------------------
 
 export type MultigroupDiffusionProfile = {
@@ -181,34 +141,4 @@ export type MultigroupDiffusionResponse = {
   energyGroupEdgesEv: number[]
   geometry: MultigroupDiffusionGeometry
   metadata: MultigroupDiffusionMetadata
-}
-
-// ---------------------------------------------------------------------------
-// Transient diffusion page
-// ---------------------------------------------------------------------------
-
-export type TransientHistoryPoint = {
-  timeSeconds: number
-  reactivityPcm: number
-  powerNorm: number
-}
-
-export type TransientDiffusionState = {
-  timeSeconds: number
-  rodInsertionPercent: number
-  running: boolean
-  reactivityPcm: number
-  powerNorm: number
-  heatmapRCm: number[]
-  heatmapZCm: number[]
-  /** heatmapPhi[i][j] = peak-normalised flux at (r_i, z_j) in [0, 1] */
-  heatmapPhi: number[][]
-  radial: CoreFluxProfile
-  axial: CoreFluxProfile
-  history: TransientHistoryPoint[]
-  geometry: CoreFluxGeometry
-  dt: number
-  meshDrCm: number
-  meshDzCm: number
-  stepCount: number
 }

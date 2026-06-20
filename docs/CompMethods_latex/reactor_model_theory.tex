@@ -33,16 +33,15 @@ the Python backend and React frontend are the \textbf{runtime implementation}.
 The most important architectural points are:
 
 \begin{quote}
-The repository now contains \textbf{two parallel modeling tracks}: an
+The repository now contains \textbf{two coupled modeling tracks}: an
 \textbf{OpenMC-informed resolved multigroup diffusion} pipeline that generates
 transport-derived, cell-homogenized group constants from Monte Carlo and solves
 the diffusion eigenvalue problem while preserving the exported cell regions,
-and an \textbf{interactive one-group web application} with a fast
-\textbf{point-kinetics surrogate} on the Overview page and a
-\textbf{spatially resolved 2D diffusion transient} on the Transient Diffusion
-page.  The multigroup pipeline is an offline verification and future
-calibration path; its exploratory rod model is not yet the source of the web
-application's production rod-worth curve.
+and an \textbf{interactive web application} with a fast
+\textbf{point-kinetics surrogate} on the Overview page and the validated
+OpenMC-informed multigroup result exposed as the Core page.  The older
+one-group Core and Transient Diffusion visualizations remain backend reference
+models only; they are no longer frontend pages.
 \end{quote}
 
 \section{Role of the notebook}
@@ -223,7 +222,8 @@ solver code:
   \item The backend then exposes two kinds of runtime models:
         \begin{itemize}
           \item a calibrated point-kinetics model for fast dashboard transients,
-          \item and spatial diffusion solvers for the Core and Transient pages.
+          \item and the validated multigroup diffusion service used by the
+                frontend Core page.
         \end{itemize}
 \end{enumerate}
 
@@ -432,12 +432,12 @@ Automatic SCRAM threshold & $26$ MW$_{\mathrm{th}}$ \\
 \end{tabular}
 \end{center}
 
-\section{Core page: steady 2D diffusion solution}
+\section{Legacy one-group core backend: steady 2D diffusion solution}
 
-The Core page is the repository's \textbf{spatial steady-state neutronics view}.
-It reuses the same annular one-group model as the notebook and solves the 2D
-eigenvalue problem for the \emph{current rod position} taken from the Overview
-simulation.
+This legacy backend service reuses the same annular one-group model as the
+notebook and solves the 2D eigenvalue problem for a supplied rod position.  It
+is retained as reference code and for historical calibration context, but it is
+no longer exposed as the frontend Core page.
 
 \subsection{Discretization}
 
@@ -450,7 +450,7 @@ The implementation in \texttt{diffusion.py} and \texttt{core\_service.py} uses:
         the fundamental flux shape.
 \end{itemize}
 
-The production Core page solve runs at
+The legacy core solve runs at
 \[
 \Delta r = \Delta z = 3\ \mathrm{cm},
 \]
@@ -557,7 +557,7 @@ is a purely numerical acceleration: neighboring rod positions have similar flux
 shapes, so reusing the previous converged state reduces iteration count without
 changing the underlying model.
 
-\subsection{What the page returns}
+\subsection{What the service returns}
 
 The backend returns:
 \begin{itemize}
@@ -567,16 +567,18 @@ The backend returns:
   \item and metadata including $k_{\mathrm{eff}}$, mesh spacing, and iteration count.
 \end{itemize}
 
-This is the web app's direct counterpart to the notebook's Estimate 2 flux maps.
+This was the web app's direct counterpart to the notebook's Estimate 2 flux
+maps before the frontend Core page was moved to the validated multigroup
+pipeline.
 
-\section{Transient Diffusion page: direct time-dependent diffusion}
+\section{Legacy transient backend: direct time-dependent diffusion}
 
-\subsection{Why this page exists}
+\subsection{Why this model exists}
 
 The Overview page assumes a fixed spatial shape and evolves only an amplitude.
-The Transient Diffusion page removes that simplification and evolves the
+The legacy transient backend removes that simplification and evolves the
 \textbf{spatial flux field itself}, together with the six delayed-neutron
-precursor fields.
+precursor fields.  It is no longer exposed as a frontend page.
 
 \subsection{Governing equations}
 
@@ -612,7 +614,7 @@ unscaled fission operator.
 
 \subsection{Numerical method}
 
-The transient page uses \textbf{fully implicit Euler}.  Eliminating the
+The transient solver uses \textbf{fully implicit Euler}.  Eliminating the
 precursors gives one sparse linear solve per time step:
 \[
 A\phi^{n+1} = b,
@@ -658,13 +660,13 @@ operations:
         precursor groups.
 \end{enumerate}
 
-This split is why the transient page can remain interactive even though it is a
-full spatial solver: the expensive part is the factorization, not the individual
-post-factorization time steps.
+This split kept the former transient page interactive even though it used a
+full spatial solver: the expensive part is the factorization, not the
+individual post-factorization time steps.
 
 \subsection{How the transient physics is manipulated into a solvable model}
 
-The transient page is more detailed than point kinetics, but it is still not a
+The legacy transient model is more detailed than point kinetics, but it is still not a
 full reactor multiphysics model.  Several physics reductions are built into the
 solver:
 \begin{itemize}
@@ -701,12 +703,12 @@ History limit & 200 points \\
 \end{tabular}
 \end{center}
 
-The transient mesh is intentionally coarser than the Core page mesh so the LU
-factorization can be rebuilt quickly whenever rod insertion changes.
+The transient mesh is intentionally coarse so the LU factorization can be
+rebuilt quickly whenever rod insertion changes.
 
 \subsection{Service-level time stepping}
 
-The transient page is advanced by \texttt{transient\_service.py}, which keeps one
+The legacy transient backend is advanced by \texttt{transient\_service.py}, which keeps one
 shared solver instance and one shared state vector.  On every
 \texttt{GET /api/transient-diffusion/state} request it:
 \begin{enumerate}
@@ -1252,6 +1254,8 @@ fixed clean CE power-shape factor when a CE power mesh is available.  Each
 response reads the current rod insertion from the point-kinetics simulation,
 solves or reuses the corresponding rodded multigroup diffusion state, and
 applies the fixed clean factor to the rodded diffusion power map.
+The frontend names this view \textbf{Core}; the backend route names remain
+\texttt{multigroup-diffusion} for compatibility.
 
 If no valid SPH factor artifact is present, the endpoint still exposes the
 uncorrected flux calculation and the post-solve power-map correction but marks
@@ -1308,11 +1312,11 @@ Layer & Model & Purpose \\
 \midrule
 OpenMC MGXS export & Resolved-cell multigroup & Generate transport-derived group constants and scattering matrices from continuous-energy Monte Carlo \\
 \rule{0pt}{13pt}%
-Multigroup diffusion solver & $G$-group 2D finite-volume with optional SPH & Solve the resolved-cell flux shape; display rodded power maps with a fixed clean CE power-shape correction \\
+Core page / multigroup diffusion solver & $G$-group 2D finite-volume with optional SPH & Solve the resolved-cell flux shape; display rodded power maps with a fixed clean CE power-shape correction \\
 Notebook estimate 1 & Homogeneous buckling & First-pass analytical check of scale and leakage trends \\
-Notebook estimate 2 / Core page & Steady 2D one-group diffusion & Compute $k_{\mathrm{eff}}$, flux maps, and rod-worth calibration from effective constants \\
+Notebook estimate 2 / legacy backend core model & Steady 2D one-group diffusion & Compute $k_{\mathrm{eff}}$, flux maps, and historical rod-worth calibration from effective constants \\
 Overview page & 0D six-group point kinetics & Fast transient driven by the calibrated reactivity curve \\
-Transient Diffusion page & 2D diffusion + 6 precursor fields & Spatial transient with evolving flux shape and power \\
+Legacy backend transient model & 2D diffusion + 6 precursor fields & Reference spatial transient model, not exposed in the frontend \\
 \bottomrule
 \end{tabular}
 \end{center}
@@ -1379,17 +1383,18 @@ increasing spatial and spectral fidelity:
         shapes.  Power maps use a fixed clean CE power-shape correction.  The
         current stored export has not yet met the requirements for a qualified
         SPH factor set.
-  \item The older \textbf{one-group annular diffusion model} remains the
-        simple spatial display model for the Core and Transient Diffusion
-        pages.  Point-kinetics rod worth now comes from the OpenMC CE rod scan.
+  \item The older \textbf{one-group annular diffusion model} remains as
+        backend reference code only.  It is no longer exposed as a frontend
+        Core or Transient Diffusion page.  Point-kinetics rod worth now comes
+        from the OpenMC CE rod scan.
   \item The \textbf{point-kinetics transient} on the Overview page gives
         fast control-response exploration in the browser.
-  \item The \textbf{direct diffusion transient} on the Transient Diffusion
-        page captures evolving spatial flux shapes during rod motion.
+  \item The \textbf{direct diffusion transient} remains a backend reference
+        model for evolving spatial flux shapes during rod motion.
 \end{itemize}
 
 The CLI \texttt{backend/openmc\_to\_diffusion.py}, the notebook
-\texttt{theory/concentricModel.ipynb}, and the four-group rod-aware web page
+\texttt{theory/concentricModel.ipynb}, and the frontend Core page
 are user-facing interfaces to the same multigroup pipeline.  The notebook
 retains the equivalent-rod scan for shape exploration and comparison against
 the OpenMC rod-worth CSV.  The

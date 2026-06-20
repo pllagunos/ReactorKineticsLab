@@ -1,8 +1,6 @@
 import type {
   SimulationState,
-  CoreFluxResponse,
   MultigroupDiffusionResponse,
-  TransientDiffusionState,
 } from './types'
 
 const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL ?? '/api').replace(/\/$/, '')
@@ -44,33 +42,6 @@ export const simulationApi = {
       method: 'POST',
       body: JSON.stringify({ running }),
     })
-  },
-  getCoreFlux() {
-    return request<CoreFluxResponse>('/core/flux')
-  },
-}
-
-export const transientApi = {
-  getState() {
-    return request<TransientDiffusionState>('/transient-diffusion/state')
-  },
-  reset() {
-    return request<TransientDiffusionState>('/transient-diffusion/reset', { method: 'POST' })
-  },
-  setRunning(running: boolean) {
-    return request<TransientDiffusionState>('/transient-diffusion/running', {
-      method: 'POST',
-      body: JSON.stringify({ running }),
-    })
-  },
-  setRodInsertion(insertionPercent: number) {
-    return request<TransientDiffusionState>('/transient-diffusion/rod-insertion', {
-      method: 'POST',
-      body: JSON.stringify({ insertionPercent }),
-    })
-  },
-  step() {
-    return request<TransientDiffusionState>('/transient-diffusion/step', { method: 'POST' })
   },
 }
 
