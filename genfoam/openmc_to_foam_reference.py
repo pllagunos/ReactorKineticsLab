@@ -153,7 +153,15 @@ def generate_openmc_to_foam_reference(
     output_dir.mkdir(parents=True, exist_ok=True)
 
     export = _load_json(mgxs_export_dir / "outputs" / "mgxs_constants.json")
-    model_xml_path = Path(export.get("model", {}).get("model_xml_path", mgxs_export_dir / "reactor_run" / "model.xml"))
+    colocated_model_xml = mgxs_export_dir / "reactor_run" / "model.xml"
+    configured_model_xml = Path(
+        export.get("model", {}).get("model_xml_path", colocated_model_xml)
+    )
+    model_xml_path = (
+        colocated_model_xml
+        if colocated_model_xml.is_file()
+        else configured_model_xml
+    )
     if not model_xml_path.exists():
         raise FileNotFoundError(f"Could not find OpenMC model XML at {model_xml_path}")
 

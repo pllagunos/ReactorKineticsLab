@@ -8,13 +8,19 @@ from pathlib import Path
 
 import numpy as np
 
-from reactor_backend.multigroup_diffusion import ConcentricMeshSpacing
+from reactor_backend.multigroup_diffusion import (
+    BOUNDARY_GROUPWISE_FVM,
+    ConcentricMeshSpacing,
+    build_multigroup_2d_system,
+)
 from reactor_backend.multigroup_diffusion_cache import (
     DiffusionCacheSettings,
     prepare_concentric_diffusion_cache,
 )
 from reactor_backend.multigroup_sph import (
+    REFERENCE_MODE_AXIAL_REGION_FLUX,
     SphFactorSet,
+    axialized_diffusion_input,
     sph_source_fingerprint,
 )
 from reactor_backend.openmc_mgxs_adapter import (
@@ -111,6 +117,28 @@ class MultiGroupDiffusionCacheTests(unittest.TestCase):
 
         self.assertNotEqual(first.fingerprint, second.fingerprint)
 
+    def test_boundary_condition_changes_cache_fingerprint(self):
+        first = prepare_concentric_diffusion_cache(
+            self.diffusion_input,
+            settings=self.settings,
+            cache_root=self.cache_directory.name,
+        )
+        changed = replace(
+            self.settings,
+            boundary_condition=BOUNDARY_GROUPWISE_FVM,
+        )
+        second = prepare_concentric_diffusion_cache(
+            self.diffusion_input,
+            settings=changed,
+            cache_root=Path(self.cache_directory.name),
+        )
+
+        self.assertNotEqual(first.fingerprint, second.fingerprint)
+        self.assertEqual(
+            second.system.model.boundary_condition,
+            BOUNDARY_GROUPWISE_FVM,
+        )
+
     def test_sph_factors_are_fingerprinted_and_persist_corrected_arrays(self):
         labels = tuple(
             dict.fromkeys(
@@ -178,6 +206,92 @@ class MultiGroupDiffusionCacheTests(unittest.TestCase):
                 cache_root=self.cache_directory.name,
                 sph_factors=replace(factors, converged=False),
             )
+
+        with self.assertRaisesRegex(ValueError, "boundary condition"):
+            prepare_concentric_diffusion_cache(
+                self.diffusion_input,
+                settings=replace(
+                    self.settings,
+                    boundary_condition=BOUNDARY_GROUPWISE_FVM,
+                ),
+                cache_root=self.cache_directory.name,
+                sph_factors=factors,
+            )
+
+    def test_axial_sph_cache_persists_cloned_region_arrays(self):
+        axial_zones = {
+            "core_fuel_ring_1": (
+                ("lower", -150.0, 0.0),
+                ("upper", 0.0, 150.0),
+            )
+        }
+        axial_input = axialized_diffusion_input(
+            self.diffusion_input,
+            axial_zones,
+        )
+        labels = tuple(
+            dict.fromkeys(zone.region.name for zone in axial_input.zones)
+        )
+        shape = (len(labels), self.diffusion_input.group_count)
+        factors = SphFactorSet(
+            region_labels=labels,
+            factors=np.full(shape, 2.0),
+            active=np.ones(shape, dtype=bool),
+            converged=True,
+            iterations=2,
+            history=(),
+            source_fingerprint=sph_source_fingerprint(
+                self.diffusion_input,
+                self.settings.spacing,
+                reference_mode=REFERENCE_MODE_AXIAL_REGION_FLUX,
+                axial_sph_zones=axial_zones,
+            ),
+            mesh_spacing=self.settings.spacing.as_dict(),
+            provisional=False,
+            reference_mode=REFERENCE_MODE_AXIAL_REGION_FLUX,
+            axial_sph_zones=axial_zones,
+        )
+        baseline_system = build_multigroup_2d_system(
+            axial_input.build_model(
+                boundary_condition=self.settings.boundary_condition,
+            ),
+            spacing=self.settings.spacing,
+        )
+
+        corrected = prepare_concentric_diffusion_cache(
+            self.diffusion_input,
+            settings=self.settings,
+            cache_root=self.cache_directory.name,
+            sph_factors=factors,
+        )
+        reloaded = prepare_concentric_diffusion_cache(
+            self.diffusion_input,
+            settings=self.settings,
+            cache_root=self.cache_directory.name,
+            sph_factors=factors,
+        )
+
+        self.assertTrue(reloaded.cache_hit)
+        self.assertIn(
+            "core_fuel_ring_1__axial_lower",
+            corrected.system.region_labels,
+        )
+        self.assertIn(
+            "core_fuel_ring_1__axial_upper",
+            corrected.system.region_labels,
+        )
+        np.testing.assert_allclose(
+            corrected.system.absorption,
+            2.0 * baseline_system.absorption,
+        )
+        np.testing.assert_allclose(
+            corrected.system.diffusion,
+            0.5 * baseline_system.diffusion,
+        )
+        np.testing.assert_array_equal(
+            corrected.system.region_index,
+            reloaded.system.region_index,
+        )
 
 
 if __name__ == "__main__":

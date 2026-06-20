@@ -296,6 +296,28 @@ def _plot_entropy_history(entropy: np.ndarray, inactive_batches: int) -> None:
     plt.show()
 
 
+def _mesh_bin_density(
+    values: np.ndarray,
+    mesh: openmc.RegularMesh | openmc.CylindricalMesh,
+) -> np.ndarray:
+    volumes = np.asarray(mesh.volumes, dtype=float).reshape(
+        tuple(mesh.dimension)
+    ).squeeze()
+    density = np.zeros_like(values, dtype=float)
+    np.divide(values, volumes, out=density, where=volumes > 0.0)
+    return density
+
+
+def _mesh_display_plane(
+    values: np.ndarray | np.ma.MaskedArray,
+    mesh: openmc.RegularMesh | openmc.CylindricalMesh,
+) -> np.ndarray | np.ma.MaskedArray:
+    if isinstance(mesh, openmc.CylindricalMesh):
+        values = np.ma.asarray(values)
+        return np.ma.concatenate((values[::-1, :], values), axis=0).T
+    return values.T
+
+
 def _plot_mesh_tallies(
     statepoint: openmc.StatePoint,
     reference_metadata: dict,
@@ -314,16 +336,57 @@ def _plot_mesh_tallies(
     flux_tally = mesh_tally.get_slice(scores=["flux"])
     fission_tally = mesh_tally.get_slice(scores=["fission"])
 
-    mesh_dimension = tuple(mesh_tally.filters[0].mesh.dimension)
-    flux = flux_tally.get_reshaped_data(value="mean").reshape(mesh_dimension).squeeze()
-    fission = fission_tally.get_reshaped_data(value="mean").reshape(mesh_dimension).squeeze()
-    flux_std = flux_tally.get_reshaped_data(value="std_dev").reshape(mesh_dimension).squeeze()
-    fission_std = fission_tally.get_reshaped_data(value="std_dev").reshape(mesh_dimension).squeeze()
+    mesh = mesh_tally.filters[0].mesh
+    flux = _mesh_bin_density(
+        np.squeeze(
+            flux_tally.get_reshaped_data(
+                value="mean",
+                expand_dims=True,
+            )
+        ),
+        mesh,
+    )
+    fission = _mesh_bin_density(
+        np.squeeze(
+            fission_tally.get_reshaped_data(
+                value="mean",
+                expand_dims=True,
+            )
+        ),
+        mesh,
+    )
+    flux_std = _mesh_bin_density(
+        np.squeeze(
+            flux_tally.get_reshaped_data(
+                value="std_dev",
+                expand_dims=True,
+            )
+        ),
+        mesh,
+    )
+    fission_std = _mesh_bin_density(
+        np.squeeze(
+            fission_tally.get_reshaped_data(
+                value="std_dev",
+                expand_dims=True,
+            )
+        ),
+        mesh,
+    )
 
     flux_masked = np.ma.masked_less_equal(flux, 0.0)
     fission_masked = np.ma.masked_less_equal(fission, 0.0)
-    flux_rel_err = np.ma.masked_where((flux <= 0.0) | ~np.isfinite(flux_std), flux_std / flux)
-    fission_rel_err = np.ma.masked_where((fission <= 0.0) | ~np.isfinite(fission_std), fission_std / fission)
+    flux_rel_err_values = np.full_like(flux, np.nan)
+    fission_rel_err_values = np.full_like(fission, np.nan)
+    np.divide(flux_std, flux, out=flux_rel_err_values, where=flux > 0.0)
+    np.divide(
+        fission_std,
+        fission,
+        out=fission_rel_err_values,
+        where=fission > 0.0,
+    )
+    flux_rel_err = np.ma.masked_invalid(flux_rel_err_values)
+    fission_rel_err = np.ma.masked_invalid(fission_rel_err_values)
 
     positive_flux = np.asarray(flux[flux > 0.0])
     positive_fission = np.asarray(fission[fission > 0.0])
@@ -331,14 +394,27 @@ def _plot_mesh_tallies(
         print(f"{tally_name} contains no positive flux or fission scores to plot.")
         return
 
-    if tally_name == "fuel-mesh":
+    if isinstance(mesh, openmc.CylindricalMesh):
+        extent = [
+            -float(mesh.r_grid[-1]),
+            float(mesh.r_grid[-1]),
+            float(mesh.z_grid[0]),
+            float(mesh.z_grid[-1]),
+        ]
+        horizontal_axis = "x [cm] (axisymmetric reconstruction)"
+        print(
+            "full reconstructed extent: "
+            f"x=[{extent[0]:.1f}, {extent[1]:.1f}] cm, "
+            f"z=[{extent[2]:.1f}, {extent[3]:.1f}] cm"
+        )
+    elif tally_name == "fuel-mesh":
         extent = [
             -fuel_parameters.outer_radius_cm,
             fuel_parameters.outer_radius_cm,
             -0.5 * fuel_parameters.h_active_cm,
             0.5 * fuel_parameters.h_active_cm,
         ]
-        histories_per_bin = reference_metadata.get("fuel_mesh_histories_per_bin")
+        horizontal_axis = "x [cm]"
     else:
         extent = [
             -reactor_tank_parameters.h2o_tank_radius_cm,
@@ -346,6 +422,11 @@ def _plot_mesh_tallies(
             -0.5 * reactor_tank_parameters.h_h2o_tank_cm,
             0.5 * reactor_tank_parameters.h_h2o_tank_cm,
         ]
+        horizontal_axis = "x [cm]"
+
+    if tally_name == "fuel-mesh":
+        histories_per_bin = reference_metadata.get("fuel_mesh_histories_per_bin")
+    else:
         histories_per_bin = reference_metadata.get("global_mesh_histories_per_bin")
 
     if histories_per_bin is not None:
@@ -369,30 +450,38 @@ def _plot_mesh_tallies(
     )
 
     flux_image = axes[0, 0].imshow(
-        flux_masked,
+        _mesh_display_plane(flux_masked, mesh),
         origin="lower",
         aspect="auto",
         extent=extent,
         norm=flux_norm,
         cmap="viridis",
     )
-    axes[0, 0].set_xlabel("x [cm]")
+    axes[0, 0].set_xlabel(horizontal_axis)
     axes[0, 0].set_ylabel("z [cm]")
-    axes[0, 0].set_title(f"Flux score ({tally_name}, log scale)")
-    plt.colorbar(flux_image, ax=axes[0, 0], label="flux")
+    axes[0, 0].set_title(f"Flux density ({tally_name}, log scale)")
+    plt.colorbar(
+        flux_image,
+        ax=axes[0, 0],
+        label="flux density per source particle",
+    )
 
     fission_image = axes[0, 1].imshow(
-        fission_masked,
+        _mesh_display_plane(fission_masked, mesh),
         origin="lower",
         aspect="auto",
         extent=extent,
         norm=fission_norm,
         cmap="magma",
     )
-    axes[0, 1].set_xlabel("x [cm]")
+    axes[0, 1].set_xlabel(horizontal_axis)
     axes[0, 1].set_ylabel("z [cm]")
-    axes[0, 1].set_title(f"Fission score ({tally_name}, log scale)")
-    plt.colorbar(fission_image, ax=axes[0, 1], label="fission")
+    axes[0, 1].set_title(f"Fission density ({tally_name}, log scale)")
+    plt.colorbar(
+        fission_image,
+        ax=axes[0, 1],
+        label="fission density per source particle",
+    )
 
     flux_rel_err_finite = np.asarray(flux_rel_err.filled(np.nan))
     flux_rel_err_finite = flux_rel_err_finite[np.isfinite(flux_rel_err_finite)]
@@ -420,7 +509,7 @@ def _plot_mesh_tallies(
         )
     else:
         flux_err_image = axes[1, 0].imshow(
-            flux_rel_err,
+            _mesh_display_plane(flux_rel_err, mesh),
             origin="lower",
             aspect="auto",
             extent=extent,
@@ -428,13 +517,13 @@ def _plot_mesh_tallies(
             vmax=min(2.0, float(np.percentile(flux_rel_err_finite, 95))),
             cmap="cividis",
         )
-        axes[1, 0].set_xlabel("x [cm]")
+        axes[1, 0].set_xlabel(horizontal_axis)
         axes[1, 0].set_ylabel("z [cm]")
         axes[1, 0].set_title("Flux relative error")
         plt.colorbar(flux_err_image, ax=axes[1, 0], label="std. dev. / mean")
 
         fission_err_image = axes[1, 1].imshow(
-            fission_rel_err,
+            _mesh_display_plane(fission_rel_err, mesh),
             origin="lower",
             aspect="auto",
             extent=extent,
@@ -442,7 +531,7 @@ def _plot_mesh_tallies(
             vmax=min(2.0, float(np.percentile(fission_rel_err_finite, 95))),
             cmap="cividis",
         )
-        axes[1, 1].set_xlabel("x [cm]")
+        axes[1, 1].set_xlabel(horizontal_axis)
         axes[1, 1].set_ylabel("z [cm]")
         axes[1, 1].set_title("Fission relative error")
         plt.colorbar(fission_err_image, ax=axes[1, 1], label="std. dev. / mean")

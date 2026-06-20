@@ -309,8 +309,9 @@ P(t) = P_0 n(t), \qquad \Phi(t) = \Phi_0 n(t).
 \subsection{How rod motion enters the point model}
 
 The point-kinetics solver does not compute rod worth from first principles during
-runtime.  Instead it reuses the \textbf{2D diffusion-derived rod-worth table}
-frozen in \texttt{calibration.py}.  Reactivity is computed as
+runtime.  Instead it loads the OpenMC continuous-energy rod-worth table
+\texttt{openmc/reference\_data/concentric/rod\_scan/results/rod\_worth.csv}.
+Reactivity is computed as
 \[
 \rho_{\mathrm{tot,pcm}}(x)
 = \rho_{\mathrm{clean,pcm}} + \Delta \rho_{\mathrm{rod,pcm}}(x)
@@ -318,15 +319,16 @@ frozen in \texttt{calibration.py}.  Reactivity is computed as
 \]
 where $x \in [0,1]$ is rod insertion fraction.  In the current calibration:
 \begin{align*}
-k_{\mathrm{clean}} &= 1.000199, \\
-\rho_{\mathrm{clean}} &= +19.9\ \mathrm{pcm}, \\
-x_{\mathrm{crit}} &\approx 0.193, \\
-\Delta \rho_{\mathrm{rod}}(1.0) &= -164.8\ \mathrm{pcm}, \\
+k_{\mathrm{clean}} &= 1.00224587, \\
+\rho_{\mathrm{clean}} &= +224.084\ \mathrm{pcm}, \\
+x_{\mathrm{crit}} &\approx 0.265, \\
+\Delta \rho_{\mathrm{rod}}(1.0) &= -1350.73\ \mathrm{pcm}, \\
 \rho_{\mathrm{scram}} &= -450\ \mathrm{pcm}\ \text{when latched.}
 \end{align*}
 
-The backend interpolates linearly between 11 precomputed insertion points
-$x = 0.0, 0.1, \dots, 1.0$.
+The backend interpolates linearly between the insertion points stored in the
+CSV.  The older diffusion-derived constants remain only as parameters for the
+legacy one-group spatial display model.
 
 \subsection{Numerical method}
 
@@ -775,6 +777,7 @@ modules rather than notebook-only logic:
         fission production, fit one factor per resolved region and energy
         group, apply the factors consistently to transport and reaction terms,
         and evaluate eigenvalue, flux, and power-shape acceptance criteria.
+        This workflow is currently paused.
   \item \textbf{Persistent preparation cache}
         (\texttt{backend/reactor\_backend/multigroup\_diffusion\_cache.py}):
         fingerprint the MGXS data, mesh settings, SPH artifact, and solver
@@ -785,8 +788,8 @@ modules rather than notebook-only logic:
 The command-line entry point is
 \texttt{backend/openmc\_to\_diffusion.py}.  The notebook
 \texttt{theory/concentricModel.ipynb} remains an analysis interface, while the
-web application exposes a four-group clean-core page backed by the same
-adapter, factor artifact, operators, and persistent solution.
+web application exposes a four-group rod-aware page backed by the same adapter,
+clean-state persistent solution, and in-process rodded solves.
 
 \subsection{MGXS export from OpenMC}
 
@@ -1144,6 +1147,33 @@ all statistically active region/group fluxes within 1\%, and normalized radial
 and axial power profiles within 2\% RMS and 5\% maximum pointwise error.
 Repeated corrected solves must agree within 1~pcm.
 
+\subsubsection{Post-solve power-shape correction}
+
+The current production correction is not SPH.  It is a post-solve power-map
+correction used only after the diffusion flux and eigenvalue have been
+computed.  The clean continuous-energy kappa-fission mesh and the clean
+diffusion power map are normalized by total power before forming
+\[
+C_{\mathrm{clean}}(r,z)
+= \frac{\widehat{P}_{\mathrm{CE}}(r,z;0)}
+       {\widehat{P}_{\mathrm{diff}}(r,z;0)} .
+\]
+For a later rod position $x$, the corrected map keeps this factor fixed:
+\[
+\widehat{P}_{\mathrm{map}}(r,z;x)
+= \operatorname{normalize}\left[
+  C_{\mathrm{clean}}(r,z) P_{\mathrm{diff}}(r,z;x)
+\right].
+\]
+This is equivalent to applying the relative rod-induced shape change predicted
+by diffusion to the clean CE power shape.  The heat-source map used by a
+point-kinetics coupling is then
+\[
+q'''(r,z,t)
+= P_{\mathrm{PK}}(t)\widehat{P}_{\mathrm{map}}(r,z;x(t)).
+\]
+The correction does not change MGXS, flux, or $k_{\mathrm{eff}}$.
+
 \subsubsection{Rod-worth scan}
 
 The equivalent-absorber rod model adds a scalar $\Delta\Sigma_a$ inside the
@@ -1154,12 +1184,15 @@ parked-rod MGXS.  A rod scan sweeps the insertion fraction
 $x \in [0,1]$, rebuilding and factorizing the affected group operators at each
 position.  The previous converged flux may be used as the next initial guess.
 
-The resulting $\Delta\rho(x)$ is explicitly exploratory.  It is not a
-transport-calibrated rod-worth curve because there are no rodded MGXS,
-rod-dependent SPH factors, or discontinuity factors in the present workflow.
-Clean-core SPH factors, when available, do not qualify this rod perturbation.
-It should not be frozen into the web application without a separate
-validation study.
+The resulting $\Delta\rho(x)$ is explicitly exploratory.  Backend point
+kinetics uses the OpenMC CE rod-worth CSV instead.  The equivalent absorber is
+kept because it gives a practical rodded diffusion power shape, but it is not a
+material replacement using rodded MGXS.  The present limitations are that the
+available MGXS were generated for the parked rod geometry, the physical rod is
+shorter than the desired full-height absorber representation, and the absorber
+composition used for the OpenMC worth scan was intentionally weakened relative
+to default B4C.  Clean-core SPH factors, when available, do not qualify this
+rod perturbation.
 
 \subsection{Persistent preparation cache}
 
@@ -1198,9 +1231,11 @@ SuperLU factorization objects are process-local and are not serialized; a
 process that needs to solve again (e.g.\ for a rod scan) loads the CSR
 matrices and re-factorizes them in memory.  The persisted operators describe
 the clean state only.  A changed rod position alters the absorption and
-scattering maps, so its operators must still be rebuilt and factorized.  On a
-cache miss, the full clean-state build-and-solve pipeline runs synchronously
-and the results are persisted.
+scattering maps, so its operators must still be rebuilt and factorized.  The
+web service keeps those rodded multigroup solves in an in-process cache keyed
+by insertion fraction, but they are not written to the persistent preparation
+cache.  On a cache miss, the full clean-state build-and-solve pipeline runs
+synchronously and the results are persisted.
 
 The default cache root is \texttt{backend/.cache/openmc\_diffusion/}.  The
 CLI entry point \texttt{backend/openmc\_to\_diffusion.py} exposes a
@@ -1209,18 +1244,21 @@ CLI entry point \texttt{backend/openmc\_to\_diffusion.py} exposes a
 
 \subsection{Integration with the web application}
 
-The web backend now exposes the four-group clean-core model through
+The web backend now exposes the four-group rod-aware model through
 \texttt{GET /api/multigroup-diffusion/state} and
 \texttt{POST /api/multigroup-diffusion/recompute}.  The service is initialized
-lazily.  It loads the persisted clean solution immediately, together with
-matching SPH factors and corrected CSR operators when a valid artifact is
-installed.  A fresh solve runs only after an explicit recompute request.
+lazily.  It loads the persisted clean solution immediately and derives the
+fixed clean CE power-shape factor when a CE power mesh is available.  Each
+response reads the current rod insertion from the point-kinetics simulation,
+solves or reuses the corresponding rodded multigroup diffusion state, and
+applies the fixed clean factor to the rodded diffusion power map.
 
-If no valid factor artifact is present, the endpoint still exposes the
-uncorrected calculation but marks it provisional and unqualified.  The page
-does not accept rod position and does not expose the exploratory equivalent-rod
-model.  Immediate rod/reactivity response remains the responsibility of point
-kinetics until rodded MGXS and rod-dependent diffusion corrections exist.
+If no valid SPH factor artifact is present, the endpoint still exposes the
+uncorrected flux calculation and the post-solve power-map correction but marks
+the result provisional and unqualified.  Rodded maps are also marked
+provisional because they use an equivalent absorber, not rodded MGXS or
+rod-dependent transport corrections.  Reactivity remains tied to the OpenMC CE
+rod-worth CSV, not to the equivalent diffusion rod-worth scan.
 
 \subsection{Current status and verification}
 
@@ -1253,14 +1291,13 @@ verification at that group count.  The workflow document
 \end{itemize}
 
 The SPH fitting, application, fingerprinting, cache, and qualification
-machinery are implemented and unit tested.  The presently stored four-group
-export cannot yet produce a qualified factor set because it predates the raw
-CE region/group flux and power-mesh payload.  Its CE eigenvalue standard
-deviation is 59.34~pcm, while final qualification requires at most 15~pcm.
-Therefore the online four-group result remains explicitly provisional until a
-new high-statistics CE export is generated and the factor fit passes all flux,
-power-shape, repeatability, and 50~pcm eigenvalue criteria.  Discontinuity
-factors and all rodded corrections remain deferred.
+machinery are implemented and unit tested, but the workflow is paused.  The
+trial axial flux and power-shape SPH variants are archived for later
+investigation because they did not yet produce a qualified correction.  The
+online four-group result therefore uses the post-solve CE power-map correction
+described above and remains explicitly provisional until a new high-statistics
+CE export and a qualified SPH factor set are available.  Discontinuity factors
+and true rodded MGXS remain deferred.
 
 \section{How the modeling layers relate}
 
@@ -1271,7 +1308,7 @@ Layer & Model & Purpose \\
 \midrule
 OpenMC MGXS export & Resolved-cell multigroup & Generate transport-derived group constants and scattering matrices from continuous-energy Monte Carlo \\
 \rule{0pt}{13pt}%
-Multigroup diffusion solver & $G$-group 2D finite-volume with optional SPH & Solve and qualify the resolved-cell clean-core eigenvalue and flux/power shapes; retain the rod scan as offline exploration only \\
+Multigroup diffusion solver & $G$-group 2D finite-volume with optional SPH & Solve the resolved-cell flux shape; display rodded power maps with a fixed clean CE power-shape correction \\
 Notebook estimate 1 & Homogeneous buckling & First-pass analytical check of scale and leakage trends \\
 Notebook estimate 2 / Core page & Steady 2D one-group diffusion & Compute $k_{\mathrm{eff}}$, flux maps, and rod-worth calibration from effective constants \\
 Overview page & 0D six-group point kinetics & Fast transient driven by the calibrated reactivity curve \\
@@ -1285,14 +1322,13 @@ The conceptual workflow is therefore:
   \item Run OpenMC with resolved-cell MGXS tallies; export constants as JSON,
   \item parse the export through the adapter and build a boundary-fitted
         finite-volume mesh,
-  \item qualify the production mesh, fit CE-referenced SPH factors, and
-        persist corrected operators,
-  \item solve and verify the clean-core multigroup diffusion eigenvalue problem
-        through the CLI, notebook, or clean-core web page,
-  \item treat the present equivalent-rod scan as exploratory until rodded data
-        and diffusion corrections are validated,
-  \item qualify any future constants or reactivity curves before transferring
-        them into the backend calibration module,
+  \item qualify the production mesh and archive SPH trials until a qualified
+        CE-referenced factor set is available,
+  \item solve the multigroup diffusion eigenvalue problem through the CLI,
+        notebook, or rod-aware web page,
+  \item use the fixed clean CE power-shape factor for rodded display maps
+        until rodded MGXS and transport corrections exist,
+  \item use the OpenMC rod-worth CSV for point-kinetics reactivity,
   \item use the existing fast point model for dashboard-style operation on the
         Overview page,
   \item and use the diffusion transient (one-group or, in the future,
@@ -1339,14 +1375,13 @@ increasing spatial and spectral fidelity:
         multigroup cross sections.
   \item A \textbf{resolved multigroup diffusion solver} consumes those MGXS
         exports, solves the $G$-group eigenvalue problem on a
-        boundary-fitted cylindrical mesh, applies a persisted CE-referenced SPH
-        factor set when available, and produces clean-core flux and power
-        shapes.  The current stored export has not yet met the statistical and
-        field-shape requirements for a qualified factor set.
+        boundary-fitted cylindrical mesh, and produces clean or rodded flux
+        shapes.  Power maps use a fixed clean CE power-shape correction.  The
+        current stored export has not yet met the requirements for a qualified
+        SPH factor set.
   \item The older \textbf{one-group annular diffusion model} remains the
-        calibration workbench for the interactive web app, providing
-        effective constants and rod-worth data for the point-kinetics and
-        steady/transient diffusion pages.
+        simple spatial display model for the Core and Transient Diffusion
+        pages.  Point-kinetics rod worth now comes from the OpenMC CE rod scan.
   \item The \textbf{point-kinetics transient} on the Overview page gives
         fast control-response exploration in the browser.
   \item The \textbf{direct diffusion transient} on the Transient Diffusion
@@ -1354,9 +1389,10 @@ increasing spatial and spectral fidelity:
 \end{itemize}
 
 The CLI \texttt{backend/openmc\_to\_diffusion.py}, the notebook
-\texttt{theory/concentricModel.ipynb}, and the four-group clean-core web page
+\texttt{theory/concentricModel.ipynb}, and the four-group rod-aware web page
 are user-facing interfaces to the same multigroup pipeline.  The notebook
-retains the uncalibrated equivalent-rod scan for offline exploration.  The
+retains the equivalent-rod scan for shape exploration and comparison against
+the OpenMC rod-worth CSV.  The
 \texttt{diffusion\_mgxs\_workflow.md} document records the group-by-group
 verification results, mesh study, SPH equations, and scattering contract that
 tie the export format to the solver expectations.

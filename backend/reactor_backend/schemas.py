@@ -176,6 +176,14 @@ class MultigroupDiffusionMetadata(BaseModel):
     provisional: bool
     qualified: bool
     qualification: dict[str, Any]
+    rodInsertionPercent: float
+    rodDeltaAbsorptionCmInv: float
+    cleanCorrectionApplied: bool
+    roddedSolveCached: bool
+    powerShapeCorrectionApplied: bool
+    powerShapeCorrectionActiveBins: int
+    powerShapeCorrectionReferenceTotal: float | None = None
+    powerShapeCorrectionDiffusionTotal: float | None = None
 
 
 class MultigroupDiffusionResponse(BaseModel):

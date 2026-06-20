@@ -73,7 +73,7 @@ def get_core_flux_endpoint() -> CoreFluxResponse:
 
 
 # ---------------------------------------------------------------------------
-# Clean-core resolved multigroup diffusion page
+# Rod-aware resolved multigroup diffusion page
 # ---------------------------------------------------------------------------
 
 
@@ -82,7 +82,8 @@ def get_core_flux_endpoint() -> CoreFluxResponse:
     response_model=MultigroupDiffusionResponse,
 )
 def get_multigroup_diffusion_state() -> MultigroupDiffusionResponse:
-    return multigroup_diffusion_service.get_state()
+    rod_pct = simulation_service.get_state().snapshot.rodInsertionPercent
+    return multigroup_diffusion_service.get_state(rod_pct)
 
 
 @app.post(
@@ -90,7 +91,8 @@ def get_multigroup_diffusion_state() -> MultigroupDiffusionResponse:
     response_model=MultigroupDiffusionResponse,
 )
 def recompute_multigroup_diffusion() -> MultigroupDiffusionResponse:
-    return multigroup_diffusion_service.recompute()
+    rod_pct = simulation_service.get_state().snapshot.rodInsertionPercent
+    return multigroup_diffusion_service.recompute(rod_pct)
 
 
 # ---------------------------------------------------------------------------

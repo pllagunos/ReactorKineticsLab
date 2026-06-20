@@ -13,6 +13,16 @@ import scipy.sparse.linalg as spla
 from .diffusion import rho_pcm
 
 
+BOUNDARY_EXTRAPOLATED_MESH = "extrapolated_mesh"
+BOUNDARY_GROUPWISE_FVM = "groupwise_fvm"
+BOUNDARY_D2O_INTERFACE_VACUUM = "d2o_interface_vacuum"
+BOUNDARY_CONDITIONS = (
+    BOUNDARY_EXTRAPOLATED_MESH,
+    BOUNDARY_GROUPWISE_FVM,
+    BOUNDARY_D2O_INTERFACE_VACUUM,
+)
+
+
 def _as_1d(values, group_count: int, name: str) -> np.ndarray:
     array = np.asarray(values, dtype=float).reshape(-1)
     if array.size != group_count:
@@ -147,15 +157,24 @@ class CylindricalLayeredModel2D:
     core: MultiGroupRegion
     moderator: MultiGroupRegion
     reflector: MultiGroupRegion
+    moderator_height: float | None = None
     rod_radius: float = 0.0
     delta_absorption_rod: float | np.ndarray = 0.0
     extrap_factor: float = 2.13
+    boundary_condition: str = BOUNDARY_EXTRAPOLATED_MESH
     zones: tuple[CylindricalRegionZone2D, ...] = ()
 
     def __post_init__(self):
         group_count = self.core.group_count
         if self.moderator.group_count != group_count or self.reflector.group_count != group_count:
             raise ValueError("All regions must use the same number of energy groups")
+        if self.boundary_condition not in BOUNDARY_CONDITIONS:
+            raise ValueError(
+                "boundary_condition must be one of "
+                f"{', '.join(BOUNDARY_CONDITIONS)}"
+            )
+        if self.moderator_height is not None and self.moderator_height <= 0.0:
+            raise ValueError("moderator_height must be positive when provided")
         for zone in self.zones:
             if zone.region.group_count != group_count:
                 raise ValueError("All zones must use the same number of energy groups")
@@ -169,12 +188,33 @@ class CylindricalLayeredModel2D:
         return float(np.max(self.reflector.diffusion))
 
     @property
+    def d2o_interface_height(self) -> float:
+        return (
+            self.outer_height
+            if self.moderator_height is None
+            else self.moderator_height
+        )
+
+    @property
     def R_extrap(self) -> float:
-        return self.reflector_radius + self.extrap_factor * self.max_boundary_diffusion
+        if self.boundary_condition == BOUNDARY_EXTRAPOLATED_MESH:
+            return self.reflector_radius + self.extrap_factor * self.max_boundary_diffusion
+        if self.boundary_condition == BOUNDARY_GROUPWISE_FVM:
+            return self.reflector_radius
+        return self.moderator_radius
 
     @property
     def H_extrap(self) -> float:
-        return self.outer_height + 2.0 * self.extrap_factor * self.max_boundary_diffusion
+        if self.boundary_condition == BOUNDARY_EXTRAPOLATED_MESH:
+            return self.outer_height + 2.0 * self.extrap_factor * self.max_boundary_diffusion
+        if self.boundary_condition == BOUNDARY_GROUPWISE_FVM:
+            return self.outer_height
+        return self.d2o_interface_height
+
+    def boundary_extrapolation_length(self, group: int) -> float:
+        if self.boundary_condition == BOUNDARY_EXTRAPOLATED_MESH:
+            return 0.0
+        return float(self.extrap_factor * self.reflector.diffusion[group])
 
 
 @dataclass(frozen=True)
@@ -490,7 +530,12 @@ def _spatial_operator(
     mesh: CylindricalMesh2D,
     diffusion: np.ndarray,
     removal: np.ndarray,
+    *,
+    radial_extrapolation_length: float = 0.0,
+    axial_extrapolation_length: float = 0.0,
 ) -> sp.csr_matrix:
+    if radial_extrapolation_length < 0.0 or axial_extrapolation_length < 0.0:
+        raise ValueError("Boundary extrapolation lengths must be non-negative")
     nr, nz = mesh.nr, mesh.nz
     d_grid = diffusion.reshape(nr, nz)
     removal_grid = removal.reshape(nr, nz)
@@ -517,10 +562,11 @@ def _spatial_operator(
             * conductance
             / radial_volume[1:, None]
         )
+    radial_boundary_distance = 0.5 * dr[-1] + radial_extrapolation_length
     c_r_right[-1] = (
         mesh.r_edges[-1]
         * d_grid[-1]
-        / (radial_volume[-1] * (0.5 * dr[-1]))
+        / (radial_volume[-1] * radial_boundary_distance)
     )
 
     c_z_bottom = np.zeros((nr, nz), dtype=float)
@@ -532,8 +578,10 @@ def _spatial_operator(
         )
         c_z_top[:, :-1] = conductance / dz[:-1][None, :]
         c_z_bottom[:, 1:] = conductance / dz[1:][None, :]
-    c_z_bottom[:, 0] = d_grid[:, 0] / (dz[0] * (0.5 * dz[0]))
-    c_z_top[:, -1] = d_grid[:, -1] / (dz[-1] * (0.5 * dz[-1]))
+    bottom_boundary_distance = 0.5 * dz[0] + axial_extrapolation_length
+    top_boundary_distance = 0.5 * dz[-1] + axial_extrapolation_length
+    c_z_bottom[:, 0] = d_grid[:, 0] / (dz[0] * bottom_boundary_distance)
+    c_z_top[:, -1] = d_grid[:, -1] / (dz[-1] * top_boundary_distance)
 
     diagonal = (
         c_r_left
@@ -599,11 +647,14 @@ def build_multigroup_2d_system(
     operators = []
     for group in range(model.group_count):
         outscatter = np.sum(scatter[:, group, :], axis=1) - scatter[:, group, group]
+        extrapolation_length = model.boundary_extrapolation_length(group)
         operators.append(
             _spatial_operator(
                 mesh,
                 diffusion[:, group],
                 absorption[:, group] + outscatter,
+                radial_extrapolation_length=extrapolation_length,
+                axial_extrapolation_length=extrapolation_length,
             )
         )
     return MultiGroupDiffusionSystem(

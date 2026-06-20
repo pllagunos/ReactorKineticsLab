@@ -1,0 +1,4 @@
+name,label,material_name,kind,baseline_value,minus_value,plus_value,delta_value,variable_unit,coefficient_value,coefficient_std,coefficient_unit,coefficient_per_percent_density,coefficient_per_percent_density_std,base_rho_pcm,base_rho_std_pcm,minus_rho_pcm,minus_rho_std_pcm,plus_rho_pcm,plus_rho_std_pcm
+fuel_temperature,Fuel temperature,U3Si2 fuel,temperature,600,550,650,50,K,-2.138272335,0.264600941,pcm/K,,,119.0118804,19.10648792,267.0462249,17.4927307,53.21899141,19.85298346
+d2o_temperature,D2O moderator temperature,Heavy water moderator,temperature,300,290,310,10,K,-10.72767894,1.292206731,pcm/K,,,119.0118804,19.10648792,260.4899565,17.9576897,45.93637771,18.58603439
+d2o_density,D2O moderator density,Heavy water moderator,density,1.105,1.09395,1.11605,0.01105,g/cm3,20993.04779,1217.951849,pcm/(g/cm3),231.9731781,13.45836793,119.0118804,19.10648792,-110.8554478,19.37097101,353.0909084,18.68893125

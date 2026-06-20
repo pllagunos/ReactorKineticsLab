@@ -52,20 +52,27 @@ def build_entropy_mesh(
 
 def _build_axial_mesh(
     mesh_shape: tuple[int, int],
-    half_width_cm: float,
+    radius_cm: float,
     half_height_cm: float,
-) -> openmc.RegularMesh:
-    mesh = openmc.RegularMesh()
-    mesh.dimension = (mesh_shape[0], 1, mesh_shape[1])
-    mesh.lower_left = (-half_width_cm, -1.0, -half_height_cm)
-    mesh.upper_right = (half_width_cm, 1.0, half_height_cm)
-    return mesh
+) -> openmc.CylindricalMesh:
+    return openmc.CylindricalMesh(
+        r_grid=np.linspace(0.0, radius_cm, mesh_shape[0] + 1),
+        phi_grid=np.asarray([0.0, 2.0 * np.pi]),
+        z_grid=np.linspace(
+            -half_height_cm,
+            half_height_cm,
+            mesh_shape[1] + 1,
+        ),
+    )
 
 
-def _build_mesh_tally(name: str, mesh: openmc.RegularMesh) -> openmc.Tally:
+def _build_mesh_tally(
+    name: str,
+    mesh: openmc.RegularMesh | openmc.CylindricalMesh,
+) -> openmc.Tally:
     tally = openmc.Tally(name=name)
     tally.filters = [openmc.MeshFilter(mesh)]
-    tally.scores = ["flux", "fission", "nu-fission"]
+    tally.scores = ["flux", "fission", "nu-fission", "kappa-fission"]
     return tally
 
 

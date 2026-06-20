@@ -159,6 +159,14 @@ export type MultigroupDiffusionMetadata = {
   provisional: boolean
   qualified: boolean
   qualification: Record<string, unknown>
+  rodInsertionPercent: number
+  rodDeltaAbsorptionCmInv: number
+  cleanCorrectionApplied: boolean
+  roddedSolveCached: boolean
+  powerShapeCorrectionApplied: boolean
+  powerShapeCorrectionActiveBins: number
+  powerShapeCorrectionReferenceTotal: number | null
+  powerShapeCorrectionDiffusionTotal: number | null
 }
 
 export type MultigroupDiffusionResponse = {

@@ -161,7 +161,6 @@ export function OverviewPage() {
             <input
               id="rod-insertion"
               type="range"
-              orient="vertical"
               className="slider-vertical"
               min="0"
               max="100"
@@ -226,4 +225,3 @@ export function OverviewPage() {
     </div>
   )
 }
-

@@ -14,6 +14,8 @@ import numpy as np
 import scipy.sparse as sp
 
 from .multigroup_diffusion import (
+    BOUNDARY_CONDITIONS,
+    BOUNDARY_EXTRAPOLATED_MESH,
     ConcentricMeshSpacing,
     CylindricalMesh2D,
     MultiGroupDiffusionSystem,
@@ -25,10 +27,11 @@ from .multigroup_sph import (
     SphFactorSet,
     build_sph_corrected_system,
     corrected_regions,
+    sph_diffusion_input,
 )
 
 
-CACHE_SCHEMA_VERSION = 4
+CACHE_SCHEMA_VERSION = 5
 DEFAULT_CACHE_ROOT = (
     Path(__file__).resolve().parents[1] / ".cache" / "openmc_diffusion"
 )
@@ -37,17 +40,26 @@ DEFAULT_CACHE_ROOT = (
 @dataclass(frozen=True)
 class DiffusionCacheSettings:
     spacing: ConcentricMeshSpacing = ConcentricMeshSpacing()
-    delta_absorption_rod: float = 0.25
+    delta_absorption_rod: float = 0.0
+    boundary_condition: str = BOUNDARY_EXTRAPOLATED_MESH
     max_iter: int = 300
     tol: float = 1.0e-6
     source_tol: float = 1.0e-3
     max_inner_iter: int = 200
     inner_tol: float = 1.0e-4
 
+    def __post_init__(self) -> None:
+        if self.boundary_condition not in BOUNDARY_CONDITIONS:
+            raise ValueError(
+                "boundary_condition must be one of "
+                f"{', '.join(BOUNDARY_CONDITIONS)}"
+            )
+
     def as_dict(self) -> dict[str, Any]:
         return {
             "spacing": self.spacing.as_dict(),
             "delta_absorption_rod": float(self.delta_absorption_rod),
+            "boundary_condition": self.boundary_condition,
             "max_iter": int(self.max_iter),
             "tol": float(self.tol),
             "source_tol": float(self.source_tol),
@@ -74,6 +86,7 @@ class PreparedDiffusionCase:
             "fingerprint": self.fingerprint,
             "group_count": self.system.group_count,
             "cell_count": self.system.cell_count,
+            "boundary_condition": self.system.model.boundary_condition,
             "mesh": {
                 "Nr": self.system.mesh.nr,
                 "Nz": self.system.mesh.nz,
@@ -290,17 +303,24 @@ def _load_cache(
 
     if sph_factors is None:
         model = diffusion_input.build_model(
-            delta_absorption_rod=settings.delta_absorption_rod
+            delta_absorption_rod=settings.delta_absorption_rod,
+            boundary_condition=settings.boundary_condition,
         )
     else:
+        if sph_factors.boundary_condition != settings.boundary_condition:
+            raise ValueError(
+                "SPH factor boundary condition does not match cache settings"
+            )
+        adjusted_input = sph_diffusion_input(diffusion_input, sph_factors)
         regions = corrected_regions(
             diffusion_input,
             sph_factors,
             settings.spacing,
         )
-        model = diffusion_input.build_model(
+        model = adjusted_input.build_model(
             delta_absorption_rod=settings.delta_absorption_rod,
             regions=regions,
+            boundary_condition=settings.boundary_condition,
         )
     system = MultiGroupDiffusionSystem(
         model=model,
@@ -374,7 +394,8 @@ def prepare_concentric_diffusion_cache(
 
     if sph_factors is None:
         model = diffusion_input.build_model(
-            delta_absorption_rod=settings.delta_absorption_rod
+            delta_absorption_rod=settings.delta_absorption_rod,
+            boundary_condition=settings.boundary_condition,
         )
         system = build_multigroup_2d_system(
             model,
@@ -382,6 +403,10 @@ def prepare_concentric_diffusion_cache(
             x_insert=0.0,
         )
     else:
+        if sph_factors.boundary_condition != settings.boundary_condition:
+            raise ValueError(
+                "SPH factor boundary condition does not match cache settings"
+            )
         system = build_sph_corrected_system(
             diffusion_input,
             sph_factors,

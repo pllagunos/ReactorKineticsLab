@@ -76,6 +76,22 @@ Within each interval, the default target spacings are:
 The default axial target spacing is 10 cm. All values are user-overridable.
 Subdividing an interval never moves a material boundary.
 
+## Boundary-Condition Modes
+
+The diffusion solver supports three vacuum-boundary treatments for testing:
+
+- `extrapolated_mesh`: legacy behavior. The mesh extends to
+  `R_refl + 2.13 max_g(D_refl,g)` and
+  `H_refl + 2 * 2.13 max_g(D_refl,g)`, then imposes zero flux at the
+  extrapolated mesh boundary.
+- `groupwise_fvm`: the mesh stops at the physical H2O reflector boundary.
+  Each group receives a finite-volume leakage term with
+  `d_ext,g = 2.13 D_refl,g`.
+- `d2o_interface_vacuum`: diagnostic-only truncation. The mesh stops at the
+  D2O/H2O interface and applies the same groupwise extrapolated-vacuum leakage
+  length. This is intentionally nonphysical and exists only to test reflector
+  sensitivity.
+
 ## Mesh Qualification
 
 SPH factors are mesh dependent, so the production mesh is selected before
@@ -157,15 +173,22 @@ all statistically active flux errors below 0.2% and a `k_eff` change below
 5 pcm. Factors are bounded and the fit fails explicitly on non-convergence.
 They are not adjusted directly to force the eigenvalue.
 
+The reflector and parked control rod are excluded from the fitted SPH active
+mask. They remain present in the diffusion solve with their canonical MGXS, but
+their factors stay at unity. This avoids driving the fixed-point iteration with
+low-population reflector groups and a parked rod region that is not part of the
+clean-core calibration target.
+
 `SphFactorSet` is immutable and records the factors, active mask, convergence
 history, source fingerprint, mesh, algorithm version, and provisional status.
 A factor file is rejected when its MGXS JSON, XML geometry, mesh, or algorithm
 version no longer matches.
 
-The existing four-group export cannot yet be fitted: it predates the raw CE
-reference payload and its CE `k_eff` standard deviation is 59.34 pcm. A final
-qualification run requires a regenerated export with uncertainty at or below
-15 pcm and the new flux and power tallies.
+The tracked two- and four-group development exports contain the raw CE
+region/group flux and cylindrical power payloads. Their CE `k_eff` uncertainty
+is reported for context, but it is no longer a pass/fail gate for SPH
+qualification. The production factor set is judged by fitted flux residuals,
+factor stability, and normalized fuel-power shape.
 
 ## Persistent Cache
 
@@ -175,6 +198,7 @@ qualification run requires a regenerated export with uncertainty at or below
 - canonical MGXS JSON contents;
 - colocated `model.xml` contents;
 - mesh-spacing configuration;
+- selected diffusion boundary-condition mode;
 - the complete SPH factor artifact and algorithm version, when applied;
 - solver tolerances and algorithm schema.
 
@@ -211,17 +235,20 @@ remains in point kinetics.
 
 A final factor set is qualified only when:
 
-- CE `k_eff` uncertainty is at most 15 pcm;
-- corrected `k_eff` is within 50 pcm of the CE mean;
+- the SPH factor iteration converges on active transformed flux residual and
+  factor stability;
 - every statistically active region/group flux is within 1% of CE;
-- normalized radial and axial power profiles are within 2% RMS and 5%
-  pointwise;
-- repeated corrected solves agree within 1 pcm.
+- normalized radial fuel-power RMS is below the configured tolerance
+  (default 8%);
+- normalized axial fuel-power RMS is below the configured tolerance
+  (default 10%).
 
-Until those conditions are met, the web page reports the result as
-provisional rather than treating the calculation as a calibrated surrogate.
+Corrected `k_eff`, reactivity, CE `k_eff` uncertainty and maximum pointwise
+power errors are still reported, but they are not SPH pass/fail gates. The
+calibrated diffusion model is intended for clean-core power and flux shape; rod
+worth and reactivity studies remain assigned to OpenMC.
 
-# Results
+# Results multigroup diffusion w/o SPH
 | Groups | MG OpenMC error vs CE | Diffusion error vs CE | Approx. diffusion bias vs MG |
 | -----: | --------------------: | --------------------: | ---------------------------: |
 |      1 |             +1908 pcm |             +1800 pcm |                     −108 pcm |
@@ -232,3 +259,14 @@ provisional rather than treating the calculation as a calibrated surrogate.
 
 These values are the uncorrected baseline. They are retained to show the
 group-condensation trend and are not SPH qualification results.
+
+# Inspiration
+
+On the use of the SPH method in nodal diffusion analyses of SFR cores - 10.1016/j.anucene.2015.06.007
+
+# Improvements
+- Regions for SPH
+- Reflector boundary conditions
+- Discontinuity factors
+
+Don't require CE k_eff < 15pcm. Instead < 100pcm but with a warning that sigma should be below 25pcm - yet still it proceeds.

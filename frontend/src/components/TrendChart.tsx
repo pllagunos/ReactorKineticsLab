@@ -9,7 +9,7 @@ import {
   Legend,
   Filler,
 } from 'chart.js'
-import type { ChartOptions, ScaleOptions } from 'chart.js'
+import type { ChartOptions, ScaleOptions, TooltipItem } from 'chart.js'
 import { formatSimTime } from '../utils/format'
 
 // ── Tree-shakable registration ────────────────────────────
@@ -129,7 +129,7 @@ export function TrendChart<T extends { timeSeconds: number }>({
       min: lo,
       max: hi,
       ticks: {
-        callback: (v) => fmt(v as number),
+        callback: (v: string | number) => fmt(Number(v)),
         color: s.color,
         font: { size: 9 },
         maxTicksLimit: 5,
@@ -180,8 +180,9 @@ export function TrendChart<T extends { timeSeconds: number }>({
         titleFont: { size: 10 },
         bodyFont: { size: 10 },
         callbacks: {
-          title: (items) => formatSimTime((items[0]?.parsed as { x: number })?.x ?? 0),
-          label: (item) => {
+          title: (items: TooltipItem<'line'>[]) =>
+            formatSimTime((items[0]?.parsed as { x: number })?.x ?? 0),
+          label: (item: TooltipItem<'line'>) => {
             const ds = active[item.datasetIndex]
             const fmt = ds.valueFormatter
             return ` ${ds.label}: ${fmt((item.parsed as { y: number }).y)}`
@@ -195,7 +196,7 @@ export function TrendChart<T extends { timeSeconds: number }>({
         min: xMin,
         max: latestTime,
         ticks: {
-          callback: (v) => formatSimTime(v as number),
+          callback: (v: string | number) => formatSimTime(Number(v)),
           maxTicksLimit: 5,
           font: { size: 9 },
         },
