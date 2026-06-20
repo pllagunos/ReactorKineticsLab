@@ -1,4 +1,4 @@
-import type { ThermalSnapshot } from '../simulation/types'
+import type { ReactorSnapshot, ThermalSnapshot } from '../simulation/types'
 import {
   formatMassFlow,
   formatPressureDropPa,
@@ -7,6 +7,7 @@ import {
 
 type Props = {
   thermal: ThermalSnapshot | null
+  snapshot: ReactorSnapshot | null
 }
 
 /** Map a normalised value t∈[0,1] through the app's flux colormap (dark-navy → blue → cyan → amber → warm-white). */
@@ -78,11 +79,13 @@ function ValueBadge({
   )
 }
 
-export function CoolingLoopDiagram({ thermal }: Props) {
+export function CoolingLoopDiagram({ thermal, snapshot }: Props) {
   const tIn = formatTemperatureK(thermal?.inletTemperatureK ?? null)
   const tOut = formatTemperatureK(thermal?.outletTemperatureK ?? null)
   const mDot = formatMassFlow(thermal?.massFlowKgPerSecond ?? null)
   const dP = formatPressureDropPa(thermal?.corePressureDropPa ?? null)
+  const rodInsertion = snapshot?.rodInsertionPercent ?? 0
+  const isScrammed = snapshot?.scramLatched ?? false
 
   // Tube bundle colour ramp: amber (hot, left) → cyan (cold, right)
   const tubeBundleRows = [0, 1, 2, 3, 4, 5, 6] as const
@@ -300,6 +303,29 @@ export function CoolingLoopDiagram({ thermal }: Props) {
             strokeDasharray="4 4"
           />
         ))}
+
+        {/* ── Control rod ── */}
+        {/* Guide tube (dashed vertical through fuel region only) */}
+        <line
+          x1={156} y1={118} x2={156} y2={282}
+          stroke="rgba(148,163,184,0.24)"
+          strokeWidth={1}
+          strokeDasharray="3 5"
+        />
+        {/* Rod body — extends downward from top of fuel region as insertion increases */}
+        {(() => {
+          const fuelTopY = 118
+          const fuelHeight = 164
+          const rodHeight = (rodInsertion / 100) * fuelHeight
+          if (rodHeight < 1) return null
+          return (
+            <rect
+              x={150} y={fuelTopY} width={12} height={rodHeight} rx={5}
+              fill={isScrammed ? '#f87171' : '#94a3b8'}
+              opacity={0.92}
+            />
+          )
+        })()}
 
         {/* Lower plenum (outlet, hot) */}
         <rect

@@ -80,7 +80,7 @@ REACTOR_MODEL = ReactorModelConfig(
 )
 
 SIMULATION_TUNING = SimulationTuningConfig(
-    history_point_limit=240,
+    history_point_limit=1200,
     history_sample_seconds=0.25,
     integrator_step_seconds=0.02,
     thermal_update_seconds=0.1,
