@@ -117,11 +117,12 @@ export function MultigroupDiffusionPage() {
     <div className="app-shell">
       <header className="panel hero-header">
         <div>
-          <p className="eyebrow">OpenMC-informed clean-core calculation</p>
+          <p className="eyebrow">OpenMC-informed rod-aware calculation</p>
           <h1>Four-group diffusion</h1>
           <p className="hero-copy">
             Resolved OpenMC cells, P0 scattering, transport-derived diffusion coefficients,
-            and optional CE-referenced SPH factors. Rod position is intentionally excluded.
+            and a fixed clean-core CE power-shape correction applied to the current
+            rodded diffusion shape.
           </p>
         </div>
         {data && (
@@ -130,10 +131,11 @@ export function MultigroupDiffusionPage() {
               {data.metadata.qualified ? 'Qualified SPH result' : 'Provisional physics result'}
             </span>
             <span>
-              k_eff {data.metadata.kEff.toFixed(6)} | OpenMC difference{' '}
+              k_eff {data.metadata.kEff.toFixed(6)} | vs clean OpenMC{' '}
               {data.metadata.differencePcm.toFixed(1)} pcm
             </span>
             <span>
+              rod {data.metadata.rodInsertionPercent.toFixed(1)}% |{' '}
               {data.metadata.cellCount.toLocaleString()} cells |{' '}
               {data.metadata.timingsSeconds.total?.toFixed(2) ?? '-'} s
             </span>
@@ -144,12 +146,18 @@ export function MultigroupDiffusionPage() {
       <section className="panel multigroup-control-bar">
         <div>
           <p className="section-label">Explicit solve control</p>
-          <strong>Clean core only</strong>
+          <strong>Current rod position</strong>
           {data && (
             <span className="multigroup-control-bar__detail">
               {data.metadata.sphApplied ? 'SPH factors applied' : 'Uncorrected diffusion'}
               {' | '}
-              {data.metadata.cached ? 'persistent cache' : 'fresh recomputation'}
+              {data.metadata.cleanCorrectionApplied
+                ? 'fixed clean-core CE power-shape correction'
+                : 'raw diffusion power'}
+              {' | '}
+              OpenMC rod-worth source
+              {' | '}
+              {data.metadata.roddedSolveCached ? 'rodded solve cache' : 'fresh rodded solve'}
             </span>
           )}
         </div>
@@ -159,7 +167,7 @@ export function MultigroupDiffusionPage() {
           onClick={() => void recompute()}
           disabled={state.status === 'loading'}
         >
-          {state.status === 'loading' ? 'Solving...' : 'Recompute'}
+          {state.status === 'loading' ? 'Solving...' : 'Recompute current rod position'}
         </button>
       </section>
 
@@ -173,7 +181,7 @@ export function MultigroupDiffusionPage() {
       {state.status === 'loading' && (
         <section className="panel loading-panel">
           <h2>Running four-group solve</h2>
-          <p className="loading-copy">Loading the persistent result or recomputing the clean core.</p>
+          <p className="loading-copy">Loading or recomputing the current rod-position result.</p>
         </section>
       )}
 
@@ -207,6 +215,10 @@ export function MultigroupDiffusionPage() {
             <div>
               <span>Outer radius</span>
               <strong>{data.geometry.reflectorRadiusCm.toFixed(1)} cm</strong>
+            </div>
+            <div>
+              <span>Equivalent rod ΔΣa</span>
+              <strong>{data.metadata.rodDeltaAbsorptionCmInv.toFixed(3)} cm^-1</strong>
             </div>
           </section>
         </>

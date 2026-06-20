@@ -1,14 +1,13 @@
 from dataclasses import dataclass
 
 from .calibration import (
-    CRITICAL_INSERTION_PERCENT,
     ESTIMATE2_H_ACTIVE_CM,
     ESTIMATE2_NOMINAL_FLUX_N_CM2_S,
     ESTIMATE2_NOMINAL_POWER_MW,
     ESTIMATE2_R_FUEL_CM,
     ESTIMATE2_R_INNER_CM,
-    FULL_INSERTION_ROD_WORTH_PCM,
 )
+from .rod_worth import ROD_WORTH_TABLE
 
 
 @dataclass(frozen=True)
@@ -69,14 +68,13 @@ REACTOR_MODEL = ReactorModelConfig(
         inner_radius_meters=ESTIMATE2_R_INNER_CM / 100.0,
         outer_radius_meters=ESTIMATE2_R_FUEL_CM / 100.0,
     ),
-    # Combined control/shutdown bank is tuned so normal operation is near
-    # critical around 32% insertion and fully inserted gives negative margin.
-    critical_rod_insertion_percent=CRITICAL_INSERTION_PERCENT,
+    # Rod-worth metadata is loaded from the OpenMC CE rod scan reference.
+    critical_rod_insertion_percent=ROD_WORTH_TABLE.critical_insertion_percent,
     nominal_flux_neutrons_per_square_centimeter_second=ESTIMATE2_NOMINAL_FLUX_N_CM2_S,
     nominal_thermal_power_mw=ESTIMATE2_NOMINAL_POWER_MW,
     neutron_generation_time_seconds=5e-4,
     scram_shutdown_pcm=450,
-    total_control_rod_worth_pcm=FULL_INSERTION_ROD_WORTH_PCM,
+    total_control_rod_worth_pcm=ROD_WORTH_TABLE.full_insertion_worth_pcm,
 )
 
 SIMULATION_TUNING = SimulationTuningConfig(
