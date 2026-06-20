@@ -109,6 +109,181 @@ effective-pipe geometry, not a validated subchannel loss prediction.  In
 particular, the current pipe hydraulic diameter is an effective calibration
 value used to keep the primary-loop pressure model well conditioned.
 
+The inlet temperature of $25^{\circ}\mathrm{C}$ is set by the return
+temperature from the pool and the secondary heat exchanger.  The nominal
+outlet of $45^{\circ}\mathrm{C}$ keeps the entire primary loop
+comfortably below saturation at any plausible low-gauge operating
+pressure and well within the single-phase D$_2$O regime.  The $55^{\circ}\mathrm{C}$
+upper bound is a conservative operating limit, not a safety margin; the
+actual saturation temperature at 3 bar gauge is approximately
+$133^{\circ}\mathrm{C}$.
+
+% -----------------------------------------------------------------------
+\section{Reactor-scale flow and heat-removal estimates}
+% -----------------------------------------------------------------------
+
+\subsection{Required primary mass flow}
+
+Using D$_2$O properties at the operating temperature midpoint
+($\approx 35^{\circ}\mathrm{C}$):
+\[
+c_p \approx 4215\ \mathrm{J/(kg\,K)},
+\qquad
+\rho \approx 1100\ \mathrm{kg/m^3}.
+\]
+
+The energy balance gives:
+\[
+\dot{m} = \frac{P}{c_p\,\Delta T}.
+\]
+
+\begin{center}
+\begin{tabular}{lccc}
+\hline
+Case & $\Delta T$ & $\dot{m}$ [kg/s] & $\dot{V}$ [m$^3$/h] \\
+\hline
+Nominal design point & 20 K & 237 & 776 \\
+Upper-bound design point & 30 K & 158 & 518 \\
+\hline
+\end{tabular}
+\end{center}
+
+The nominal design flow of approximately $237\ \mathrm{kg/s}$
+($776\ \mathrm{m^3/h}$) is the primary target for pump and piping sizing.
+The upper-bound flow of $158\ \mathrm{kg/s}$ sets the lower flow limit
+at which the outlet temperature constraint is still met.
+
+\subsection{Pump duty}
+
+The pump shaft power scales with the loop pressure drop:
+\[
+W_{\mathrm{pump}} \approx \frac{\Delta p \cdot \dot{V}}{\eta}, \qquad \eta \approx 0.7.
+\]
+
+For the nominal design point:
+
+\begin{center}
+\begin{tabular}{lcc}
+\hline
+Loop $\Delta p$ & $W_{\mathrm{pump}}$ (nominal $\dot{m}$) & $W_{\mathrm{pump}}$ (upper-bound $\dot{m}$) \\
+\hline
+1 bar & $31\ \mathrm{kW}$ & $21\ \mathrm{kW}$ \\
+2 bar & $62\ \mathrm{kW}$ & $41\ \mathrm{kW}$ \\
+3 bar & $92\ \mathrm{kW}$ & $62\ \mathrm{kW}$ \\
+5 bar & $154\ \mathrm{kW}$ & $103\ \mathrm{kW}$ \\
+\hline
+\end{tabular}
+\end{center}
+
+A total loop pressure drop in the range of 2--3 bar is a plausible first
+estimate for a large-scale research-reactor primary circuit, giving a pump
+duty on the order of 60--90 kW at the nominal flow.
+
+\subsection{Pool thermal time constant}
+
+The surrounding pool (Section~\ref{sec:pool}) has a volume of
+$2535\ \mathrm{m^3}$ ($2.535 \times 10^6\ \mathrm{litres}$).  Its
+thermal time constant at full reactor power with no active cooling is:
+\[
+\tau = \frac{m_{\mathrm{pool}}\,c_{p,\mathrm{water}}}{P}
+= \frac{2535 \times 10^3 \times 4200}{20 \times 10^6}
+\approx 530\ \mathrm{s}
+\approx 9\ \mathrm{min}.
+\]
+
+This confirms that the pool cannot serve as the primary heat sink for
+sustained operation: at full power it would heat up by 20 K in roughly
+9 minutes.  The primary forced-circulation loop is therefore the
+essential heat-removal path, and the pool is a structural heat reservoir
+for short transients only.
+
+% 
+\subsection{Flow direction}
+
+The primary coolant flows \textbf{top to bottom} through the effective
+core channel.  The inlet is at the top of the active region; the outlet
+is at the bottom.  This matches the natural downward-flow convention seen
+in several research-reactor designs and means the hottest bulk coolant
+leaves at the bottom before routing to the heat exchanger.
+
+\subsection{Stagnant reflector and pool}
+
+The outer D$_2$O reflector and the surrounding pool water together
+constitute a large stagnant inventory that provides:
+\begin{itemize}
+  \item long-term thermal mass for decay-heat transient absorption,
+  \item shielding of personnel and instrumentation,
+  \item neutron moderation in the outer reflector zone.
+\end{itemize}
+
+The rectangular pool surrounding the reactor vessel has approximate
+dimensions of $15\ \mathrm{m}\ (\mathrm{height}) \times
+13\ \mathrm{m} \times 13\ \mathrm{m}\ (\mathrm{base})$, giving a total
+volume of approximately $2535\ \mathrm{m^3}$ ($2.535 \times 10^6$
+litres).
+
+In the next Modelica model, this inventory is represented as a
+\textbf{fixed-temperature or slowly varying thermal boundary condition}.
+Active pool cooling, pool-loop flow, and pool temperature dynamics are
+not modelled in the first implementation pass.
+
+
+% -----------------------------------------------------------------------
+\section{Simplified primary loop}
+% -----------------------------------------------------------------------
+
+The primary D$_2$O loop follows a fixed topology inspired by
+forced-circulation research reactors such as FRM~II, but simplified
+aggressively to the minimum useful set of components.
+
+\subsection{Topology}
+
+\begin{enumerate}
+  \item \textbf{Upper inlet plenum.}  A vessel volume at the top of the
+        core that distributes incoming primary coolant across the
+        effective core channel entrance and provides hydraulic
+        decoupling.
+  \item \textbf{Effective core channel.}  A single axially discretised
+        heated pipe (8 nodes) carrying the total primary flow top to
+        bottom.  Heat input follows the axial power profile from the
+        neutronics model.
+  \item \textbf{Lower outlet plenum.}  A vessel volume at the bottom of
+        the core that collects the heated coolant before it exits to the
+        primary piping.
+  \item \textbf{Primary pump.}  A single centrifugal pump model with a
+        representative head curve operating on the D$_2$O primary
+        inventory.  Nominal operating point: $\approx 237\ \mathrm{kg/s}$
+        at $2$--$3\ \mathrm{bar}$ head.
+  \item \textbf{Primary heat exchanger (primary side).}  A counterflow
+        shell-and-tube or plate-heat-exchanger model on the primary side
+        that removes the full 20 MW to the secondary loop at nominal
+        conditions.
+\end{enumerate}
+
+\subsection{Selected nominal operating parameters}
+
+\begin{center}
+\begin{tabular}{lc}
+\hline
+Parameter & Value \\
+\hline
+Primary coolant & D$_2$O \\
+Inlet temperature & $25^{\circ}\mathrm{C}$ \\
+Nominal outlet temperature & $45^{\circ}\mathrm{C}$ \\
+Upper outlet limit & $55^{\circ}\mathrm{C}$ \\
+Nominal mass flow & $237\ \mathrm{kg/s}$ \\
+Nominal volumetric flow & $\approx 776\ \mathrm{m^3/h}$ \\
+Loop pressure regime & $\lesssim 3\ \mathrm{bar}$ gauge \\
+Core flow direction & top-to-bottom \\
+\hline
+\end{tabular}
+\end{center}
+
+\subsection{Simplified secondary loop}
+The secondary side removes heat from the primary loop and rejects it to
+an ultimate heat sink.  It is modelled at the minimum useful resolution using
+only a dynamic pipe with a fixed secondary temperature heat sink.
+
 \section{Core Thermal Model}
 
 \subsection{Coolant channel}
