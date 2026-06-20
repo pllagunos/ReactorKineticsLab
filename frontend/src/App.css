@@ -797,3 +797,183 @@ input[type='range'] {
   opacity: 0.45;
   cursor: not-allowed;
 }
+
+/* ── Redesigned overview page ──────────────────────────── */
+
+.overview-shell {
+  gap: 0.85rem;
+}
+
+/* ── Top stat chips row ────────────────────────────────── */
+
+.overview-stat-row {
+  display: flex;
+  gap: 0.65rem;
+}
+
+.stat-chip {
+  flex: 1;
+  min-width: 0;
+  padding: 0.55rem 0.85rem;
+  border-radius: 0.65rem;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  background: rgba(15, 23, 42, 0.7);
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.stat-chip--warning {
+  border-color: rgba(245, 158, 11, 0.35);
+}
+
+.stat-chip--danger {
+  border-color: rgba(248, 113, 113, 0.38);
+}
+
+.stat-chip--cool {
+  border-color: rgba(56, 189, 248, 0.32);
+}
+
+.stat-chip__label {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-dim);
+}
+
+.stat-chip__value {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text-strong);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── HMI + controls row ────────────────────────────────── */
+
+.overview-hmi-row {
+  display: grid;
+  gap: 0.85rem;
+  grid-template-columns: 88px minmax(0, 1fr);
+}
+
+.overview-controls {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.6rem 0.4rem;
+  background: linear-gradient(180deg, rgba(17, 24, 39, 0.96), rgba(10, 15, 27, 0.92));
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 1rem;
+}
+
+.vertical-slider-group {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.35rem;
+  flex: 1;
+}
+
+.vertical-slider-label {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--text-dim);
+}
+
+.slider-vertical {
+  writing-mode: vertical-lr;
+  -webkit-appearance: slider-vertical;
+  appearance: slider-vertical;
+  width: 22px;
+  height: 160px;
+  accent-color: #7dd3fc;
+  cursor: pointer;
+  flex: 1;
+}
+
+.slider-vertical:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.vertical-slider-value {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text-strong);
+  font-variant-numeric: tabular-nums;
+}
+
+.overview-controls__buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  width: 100%;
+}
+
+.overview-controls__buttons .button {
+  font-size: 0.76rem;
+  padding: 0.4rem 0.35rem;
+  text-align: center;
+}
+
+/* ── Trend charts row ──────────────────────────────────── */
+
+.overview-trends-row {
+  display: grid;
+  gap: 0.85rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+/* ── Info footer ───────────────────────────────────────── */
+
+.overview-info {
+  padding: 0.85rem 1.1rem;
+}
+
+.overview-info p {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: 0.82rem;
+  line-height: 1.55;
+}
+
+/* ── Multi-line chart legend ───────────────────────────── */
+
+.chart-card__legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  font-size: 0.75rem;
+  color: var(--text-dim);
+}
+
+.chart-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 0.28rem;
+  white-space: nowrap;
+}
+
+.chart-legend-item strong {
+  color: var(--text-strong);
+  font-weight: 600;
+}
+
+.chart-legend-swatch {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
+/* ── Chart.js canvas container ──────────────────────────── */
+
+.chart-card__canvas-wrap {
+  position: relative;
+  width: 100%;
+  height: 210px;
+}
