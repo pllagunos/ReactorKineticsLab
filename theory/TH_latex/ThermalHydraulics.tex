@@ -29,6 +29,7 @@ model intended to provide:
   \item primary-loop inlet and outlet coolant temperatures,
   \item primary mass flow and core pressure drop diagnostics,
   \item fuel and moderator effective temperatures for reactivity feedback,
+  \item an effective D$_2$O moderator density for density feedback,
   \item a transient fuel heat capacity between fission power and coolant heat removal.
 \end{itemize}
 
@@ -175,6 +176,24 @@ with those heat ports, the fallback approximation is
 T_{m,eff} \approx \frac{T_{in}+T_{out}}{2}.
 \]
 
+The moderator density feedback uses a compact D$_2$O density approximation
+rather than the current light-water medium density:
+\[
+\rho_{D2O}(p,T) = \rho_{ref}\left[1 - \beta(T-T_{ref})
+  + \kappa(p-p_{ref})\right],
+\]
+with $\rho_{ref}=1105\ \mathrm{kg/m^3}$, $T_{ref}=300\ \mathrm{K}$,
+$p_{ref}=4.0\times10^5\ \mathrm{Pa}$, $\beta=3.0\times10^{-4}\ \mathrm{K^{-1}}$,
+and $\kappa=4.5\times10^{-10}\ \mathrm{Pa^{-1}}$.  The effective SI density
+is power-weighted over the same axial nodes:
+\[
+\rho_{m,eff}^{SI} = \sum_{j=1}^{N_z} f_j\rho_{D2O}(p_j,T_j),
+\qquad
+\rho_{m,eff} = \frac{\rho_{m,eff}^{SI}}{1000}.
+\]
+Here $\rho_{m,eff}^{SI}$ is in $\mathrm{kg/m^3}$ and $\rho_{m,eff}$ is in
+$\mathrm{g/cm^3}$ for neutronics feedback interfaces that expect cgs density.
+
 The model also exposes diagnostic maximum temperatures:
 \begin{itemize}
   \item \texttt{T\_fuelCenterlineMax}, the maximum inner fuel-node temperature,
@@ -201,6 +220,8 @@ Modelica $\to$ Python & \texttt{massFlow} & primary mass flow rate [kg/s] \\
 Modelica $\to$ Python & \texttt{dp\_core} & core pressure drop [Pa] \\
 Modelica $\to$ Python & \texttt{T\_fuelEff} & Doppler-relevant effective fuel temperature [K] \\
 Modelica $\to$ Python & \texttt{T\_moderatorEff} & effective moderator/coolant temperature [K] \\
+Modelica $\to$ Python & \texttt{rho\_m\_eff\_SI} & effective D$_2$O moderator density [kg/m$^3$] \\
+Modelica $\to$ Python & \texttt{rho\_m\_eff} & effective D$_2$O moderator density [g/cm$^3$] \\
 Modelica $\to$ Python & \texttt{T\_fuelCenterlineMax} & diagnostic peak fuel centerline node [K] \\
 Modelica $\to$ Python & \texttt{T\_fuelWallMax} & diagnostic peak fuel wall [K] \\
 \hline

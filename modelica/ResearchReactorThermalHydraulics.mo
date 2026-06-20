@@ -8,6 +8,20 @@ model ResearchReactorThermalHydraulics
    Secondary side: fixed-temperature heat sink at 20 degC, UA = 1.33 MW/K.
    Architecture reference: ReactorKineticsLab/theory/ThermalHydraulics.tex"
 
+  function rhoD2O_pT
+    input Modelica.Units.SI.AbsolutePressure p;
+    input Modelica.Units.SI.Temperature T;
+    output Modelica.Units.SI.Density d;
+  protected
+    parameter Modelica.Units.SI.Density d_ref = 1105.0;
+    parameter Modelica.Units.SI.Temperature T_ref = 300.0;
+    parameter Modelica.Units.SI.AbsolutePressure p_ref = 4.0e5;
+    parameter Real beta(unit = "1/K") = 3.0e-4;
+    parameter Real kappa(unit = "1/Pa") = 4.5e-10;
+  algorithm
+    d := d_ref * (1 - beta * (T - T_ref) + kappa * (p - p_ref));
+  end rhoD2O_pT;
+
   parameter Integer nAxialNodes(min = 1) = 8
     "Axial nodes in the core channel";
   parameter Integer nHxNodes(min = 1) = 8
@@ -369,44 +383,52 @@ model ResearchReactorThermalHydraulics
     unit  = "W",
     min   = 0,
     start = P_nominal)
-    annotation(Placement(transformation(origin = {38, -54}, extent = {{-130, 10}, {-110, 30}}), iconTransformation(extent = {{-130, 10}, {-110, 30}})));
+    annotation(Placement(transformation(origin = {4, -12}, extent = {{-130, 10}, {-110, 30}}), iconTransformation(extent = {{-130, 10}, {-110, 30}})));
 
   Modelica.Blocks.Interfaces.RealInput axialPowerFractions[nAxialNodes](
     each unit  = "1",
     each min   = 0,
     each start = 1.0 / nAxialNodes)
-    annotation(Placement(transformation(origin = {38, -58}, extent = {{-130, -10}, {-110, 10}}), iconTransformation(extent = {{-130, -10}, {-110, 10}})));
+    annotation(Placement(transformation(origin = {4, -16}, extent = {{-130, -10}, {-110, 10}}), iconTransformation(extent = {{-130, -10}, {-110, 10}})));
 
 // ── FMI outputs ───────────────────────────────────────────────────────────
   Modelica.Blocks.Interfaces.RealOutput T_inlet(unit = "K")
-    annotation(Placement(transformation(origin = {-8, -28}, extent = {{110, 70}, {130, 90}}), iconTransformation(extent = {{110, 70}, {130, 90}})));
+    annotation(Placement(transformation(origin = {-8, 8}, extent = {{110, 70}, {130, 90}}), iconTransformation(extent = {{110, 70}, {130, 90}})));
 
   Modelica.Blocks.Interfaces.RealOutput T_outlet(unit = "K")
-    annotation(Placement(transformation(origin = {-8, -28}, extent = {{110, 50}, {130, 70}}), iconTransformation(extent = {{110, 50}, {130, 70}})));
+    annotation(Placement(transformation(origin = {-8, 8}, extent = {{110, 50}, {130, 70}}), iconTransformation(extent = {{110, 50}, {130, 70}})));
 
   Modelica.Blocks.Interfaces.RealOutput massFlow(unit = "kg/s")
-    annotation(Placement(transformation(origin = {-8, -28}, extent = {{110, 30}, {130, 50}}), iconTransformation(extent = {{110, 30}, {130, 50}})));
+    annotation(Placement(transformation(origin = {-8, 8}, extent = {{110, 30}, {130, 50}}), iconTransformation(extent = {{110, 30}, {130, 50}})));
 
   Modelica.Blocks.Interfaces.RealOutput dp_core(unit = "Pa")
-    annotation(Placement(transformation(origin = {-8, -30}, extent = {{110, 10}, {130, 30}}), iconTransformation(extent = {{110, 10}, {130, 30}})));
+    annotation(Placement(transformation(origin = {-8, 6}, extent = {{110, 10}, {130, 30}}), iconTransformation(extent = {{110, 10}, {130, 30}})));
 
   Modelica.Blocks.Interfaces.RealOutput T_fuelCenterlineMax(unit = "K")
-    annotation(Placement(transformation(origin = {-8, -30}, extent = {{110, -10}, {130, 10}}), iconTransformation(extent = {{110, -10}, {130, 10}})));
+    annotation(Placement(transformation(origin = {-8, 6}, extent = {{110, -10}, {130, 10}}), iconTransformation(extent = {{110, -10}, {130, 10}})));
 
   Modelica.Blocks.Interfaces.RealOutput T_fuelWallMax(unit = "K")
-    annotation(Placement(transformation(origin = {-8, -30}, extent = {{110, -30}, {130, -10}}), iconTransformation(extent = {{110, -30}, {130, -10}})));
+    annotation(Placement(transformation(origin = {-8, 6}, extent = {{110, -30}, {130, -10}}), iconTransformation(extent = {{110, -30}, {130, -10}})));
 
   Modelica.Blocks.Interfaces.RealOutput T_fuelEff(unit = "K")
-    annotation(Placement(transformation(origin = {-8, -30}, extent = {{110, -50}, {130, -30}}), iconTransformation(extent = {{110, -50}, {130, -30}})));
+    annotation(Placement(transformation(origin = {-8, 6}, extent = {{110, -50}, {130, -30}}), iconTransformation(extent = {{110, -50}, {130, -30}})));
 
   Modelica.Blocks.Interfaces.RealOutput T_moderatorEff(unit = "K")
-    annotation(Placement(transformation(origin = {-8, -30}, extent = {{110, -70}, {130, -50}}), iconTransformation(extent = {{110, -70}, {130, -50}})));
+    annotation(Placement(transformation(origin = {-8, 6}, extent = {{110, -70}, {130, -50}}), iconTransformation(extent = {{110, -70}, {130, -50}})));
+
+  Modelica.Blocks.Interfaces.RealOutput rho_m_eff_SI(unit = "kg/m3")
+    annotation(Placement(transformation(origin = {-8, 6}, extent = {{110, -90}, {130, -70}}), iconTransformation(extent = {{110, -90}, {130, -70}})));
+
+  Modelica.Blocks.Interfaces.RealOutput rho_m_eff(unit = "g/cm3")
+    annotation(Placement(transformation(origin = {-8, 6}, extent = {{110, -110}, {130, -90}}), iconTransformation(extent = {{110, -110}, {130, -90}})));
 
 
 protected
   Real positiveFractions[nAxialNodes](each unit = "1");
   Real normalizedFractions[nAxialNodes](each unit = "1");
   Modelica.Units.SI.HeatFlowRate nodeHeatFlow[nAxialNodes];
+  Modelica.Units.SI.AbsolutePressure p_coreNode[nAxialNodes];
+  Modelica.Units.SI.Temperature T_coreNode[nAxialNodes];
   Real fractionSum(unit = "1");
 
 equation
@@ -455,8 +477,15 @@ equation
   T_fuelEff = sum({normalizedFractions[i] *
     sum({fuelNode[i, r].T for r in 1:nFuelRadialNodes}) / nFuelRadialNodes
     for i in 1:nAxialNodes});
-  T_moderatorEff = sum({normalizedFractions[i] * core.heatPorts[i].T
+  for i in 1:nAxialNodes loop
+    p_coreNode[i] = core.flowModel.states[i].p;
+    T_coreNode[i] = core.heatPorts[i].T;
+  end for;
+  T_moderatorEff = sum({normalizedFractions[i] * T_coreNode[i]
     for i in 1:nAxialNodes});
+  rho_m_eff_SI = sum({normalizedFractions[i] * rhoD2O_pT(p_coreNode[i], T_coreNode[i])
+    for i in 1:nAxialNodes});
+  rho_m_eff = rho_m_eff_SI / 1000.0;
 // ── Primary loop fluid connections ────────────────────────────────────────
   connect(core.port_b, outletPipe.port_a) annotation(
     Line(points = {{-9, -22}, {-9, -34}}, color = {0, 127, 255}));
@@ -542,7 +571,9 @@ D<sub>2</sub>O primary loop).  Architecture specified in
 <code>T_fuelCenterlineMax</code>&nbsp;[K],
 <code>T_fuelWallMax</code>&nbsp;[K],
 <code>T_fuelEff</code>&nbsp;[K],
-<code>T_moderatorEff</code>&nbsp;[K]
+<code>T_moderatorEff</code>&nbsp;[K],
+<code>rho_m_eff_SI</code>&nbsp;[kg/m3],
+<code>rho_m_eff</code>&nbsp;[g/cm3]
 </p>
 </html>"),
     experiment(StopTime = 6000, Interval = 5.0, Tolerance = 1e-6),
