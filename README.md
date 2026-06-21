@@ -110,12 +110,18 @@ Key backend files:
   - point-kinetics engine
 - `backend/reactor_backend/service.py`
   - stateful simulation service, history, and timing
+- `backend/reactor_backend/thermal_adapter.py`
+  - Modelica FMU lifecycle, inputs/outputs, compatibility checks, and fallback
 - `backend/reactor_backend/multigroup_service.py`
   - cached four-group clean-core diffusion service
 - `backend/reactor_backend/multigroup_sph.py`
   - CE-referenced SPH fitting, application, and qualification
 - `backend/reactor_backend/app.py`
   - FastAPI routes
+
+The Modelica FMU coupling is documented in `docs/fmu_coupling.md`.
+The webapp system architecture diagram is documented in
+`docs/system_architecture.md`.
 
 ## API shape (is this needed -> ne, maybe a webpage architecture MD file)
 
