@@ -51,6 +51,14 @@ export function formatMassFlow(massFlowKgPerSecond: number | null) {
   return `${massFlowFormatter.format(massFlowKgPerSecond)} kg/s`
 }
 
+export function formatDensityGPerCm3(densityGPerCm3: number | null) {
+  if (densityGPerCm3 === null) {
+    return 'n/a'
+  }
+
+  return `${densityGPerCm3.toFixed(4)} g/cm^3`
+}
+
 export function formatPressureDropPa(pressureDropPa: number | null) {
   if (pressureDropPa === null) {
     return 'n/a'

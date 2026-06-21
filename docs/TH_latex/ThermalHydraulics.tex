@@ -102,9 +102,10 @@ Primary pressure regime & low pressure, single phase \\
 \end{center}
 
 At this stage the pump remains flow-controlled at the nominal mass flow.
-The inlet plenum is represented as an open expansion volume, which supplies
-an absolute pressure reference without a bidirectional pressure-source side
-branch.  The pressure drop is therefore a diagnostic for the current
+The inlet plenum is represented as a closed compliance volume connected to
+a fixed 4 bar pressure-reference boundary.  This keeps the FMU hydraulic
+pressure level well posed during coupled transients and prevents unphysical
+absolute-pressure drift in the closed primary loop.  The pressure drop is therefore a diagnostic for the current
 effective-pipe geometry, not a validated subchannel loss prediction.  In
 particular, the current pipe hydraulic diameter is an effective calibration
 value used to keep the primary-loop pressure model well conditioned.
@@ -239,10 +240,11 @@ aggressively to the minimum useful set of components.
 \subsection{Topology}
 
 \begin{enumerate}
-  \item \textbf{Upper inlet plenum.}  A vessel volume at the top of the
-        core that distributes incoming primary coolant across the
-        effective core channel entrance and provides hydraulic
-        decoupling.
+  \item \textbf{Upper inlet plenum.}  A closed compliance volume at the top
+        of the core that distributes incoming primary coolant across the
+        effective core channel entrance, provides hydraulic decoupling,
+        and connects to a fixed 4 bar pressure-reference boundary for FMU
+        pressure anchoring.
   \item \textbf{Effective core channel.}  A single axially discretised
         heated pipe (8 nodes) carrying the total primary flow top to
         bottom.  Heat input follows the axial power profile from the
@@ -406,6 +408,15 @@ Modelica $\to$ Python & \texttt{T\_fuelWallMax} & diagnostic peak fuel wall [K] 
 The initial conditions are set near the nominal 20 MW operating point to
 avoid starting coupled point-kinetics runs from cold fuel.  This is still
 an approximate initialization, not a formal steady-state solve.
+
+The Python backend consumes \texttt{T\_fuelEff}, \texttt{T\_moderatorEff}, and
+\texttt{rho\_m\_eff} for point-kinetics reactivity feedback.  The feedback
+slopes come from the OpenMC finite-difference reactivity-coefficient table under
+\texttt{openmc/reference\_data/concentric/reactivity\_coefficients}.  At reset,
+the first available FMI effective state is used as the zero-feedback reference,
+so the coupled model starts from the same critical rod insertion as the
+rod-worth calibration.  If the FMU is unavailable and the Python fallback
+thermal model is active, these feedback terms are not applied.
 
 \section{Deliberate Limits}
 

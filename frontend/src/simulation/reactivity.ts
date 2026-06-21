@@ -29,9 +29,14 @@ export function computeReactivity(
   return {
     baseExcessPcm,
     dollars: totalPcm / reactorModel.betaEffectivePcm,
+    fuelTemperatureFeedbackPcm: 0,
+    moderatorDensityFeedbackPcm: 0,
+    moderatorTemperatureFeedbackPcm: 0,
     rodContributionPcm,
     rodInsertionPercent: clampedInsertionPercent,
     scramPenaltyPcm,
+    thermalFeedbackApplied: false,
+    thermalFeedbackPcm: 0,
     totalDeltaK: totalPcm * 1e-5,
     totalPcm,
   }

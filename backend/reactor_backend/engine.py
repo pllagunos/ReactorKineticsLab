@@ -2,8 +2,8 @@ import math
 from typing import Optional
 
 from .config import DELAYED_NEUTRON_GROUPS, REACTOR_MODEL
-from .reactivity import compute_reactivity
-from .schemas import ReactorRegime, ReactorSnapshot
+from .reactivity import ThermalFeedbackInput, compute_reactivity
+from .schemas import ReactorRegime, ReactorSnapshot, ThermalSnapshot
 
 
 def equilibrium_precursors(neutron_population: float) -> list[float]:
@@ -51,6 +51,8 @@ class ReactorEngine:
         self.neutron_population = 1.0
         self.precursor_concentrations = equilibrium_precursors(1.0)
         self.last_period_seconds: Optional[float] = None
+        self.thermal_feedback: Optional[ThermalFeedbackInput] = None
+        self.thermal_feedback_reference: Optional[ThermalFeedbackInput] = None
 
     def reset(self) -> None:
         self.rod_insertion_percent = REACTOR_MODEL.critical_rod_insertion_percent
@@ -59,6 +61,24 @@ class ReactorEngine:
         self.neutron_population = 1.0
         self.precursor_concentrations = equilibrium_precursors(1.0)
         self.last_period_seconds = None
+        self.thermal_feedback = None
+        self.thermal_feedback_reference = None
+
+    def set_thermal_feedback_snapshot(
+        self,
+        thermal_snapshot: ThermalSnapshot,
+        *,
+        reset_reference: bool = False,
+    ) -> None:
+        feedback = ThermalFeedbackInput(
+            source=thermal_snapshot.source,
+            fuel_temperature_k=thermal_snapshot.fuelTemperatureK,
+            moderator_temperature_k=thermal_snapshot.moderatorTemperatureK,
+            moderator_density_g_per_cm3=thermal_snapshot.moderatorDensityGPerCm3,
+        )
+        self.thermal_feedback = feedback
+        if reset_reference:
+            self.thermal_feedback_reference = feedback if feedback.active else None
 
     def set_rod_insertion(self, insertion_percent: float) -> None:
         if self.scram_latched:
@@ -74,7 +94,12 @@ class ReactorEngine:
         if step_seconds <= 0:
             return
 
-        reactivity = compute_reactivity(self.rod_insertion_percent, self.scram_latched)
+        reactivity = compute_reactivity(
+            self.rod_insertion_percent,
+            self.scram_latched,
+            self.thermal_feedback,
+            self.thermal_feedback_reference,
+        )
         prompt_term = (
             reactivity.totalDeltaK - REACTOR_MODEL.beta_effective
         ) / REACTOR_MODEL.neutron_generation_time_seconds
@@ -125,7 +150,12 @@ class ReactorEngine:
             self.scram()
 
     def get_snapshot(self) -> ReactorSnapshot:
-        reactivity = compute_reactivity(self.rod_insertion_percent, self.scram_latched)
+        reactivity = compute_reactivity(
+            self.rod_insertion_percent,
+            self.scram_latched,
+            self.thermal_feedback,
+            self.thermal_feedback_reference,
+        )
         thermal_power_mw = (
             REACTOR_MODEL.nominal_thermal_power_mw * self.neutron_population
         )

@@ -38,9 +38,14 @@ class SimulationTuning(BaseModel):
 class ReactivitySnapshot(BaseModel):
     baseExcessPcm: float
     dollars: float
+    fuelTemperatureFeedbackPcm: float = 0.0
+    moderatorDensityFeedbackPcm: float = 0.0
+    moderatorTemperatureFeedbackPcm: float = 0.0
     rodContributionPcm: float
     rodInsertionPercent: float
     scramPenaltyPcm: float
+    thermalFeedbackApplied: bool = False
+    thermalFeedbackPcm: float = 0.0
     totalDeltaK: float
     totalPcm: float
 
@@ -64,6 +69,11 @@ class ThermalSnapshot(BaseModel):
     powerMw: float
     inletTemperatureK: Optional[float] = None
     outletTemperatureK: Optional[float] = None
+    fuelMaximumTemperatureK: Optional[float] = None
+    fuelTemperatureK: Optional[float] = None
+    moderatorTemperatureK: Optional[float] = None
+    moderatorDensityKgPerM3: Optional[float] = None
+    moderatorDensityGPerCm3: Optional[float] = None
     massFlowKgPerSecond: Optional[float] = None
     corePressureDropPa: Optional[float] = None
     message: Optional[str] = None
@@ -163,6 +173,8 @@ class MultigroupDiffusionMetadata(BaseModel):
     cleanCore: bool
     groupCount: int
     kEff: float
+    reactivityPcm: float
+    openmcCeReactivityPcm: float
     openmcReferenceKEff: float
     openmcReferenceStdDevPcm: float
     differencePcm: float
@@ -187,7 +199,12 @@ class MultigroupDiffusionMetadata(BaseModel):
 
 
 class MultigroupDiffusionResponse(BaseModel):
-    heatmapRCm: list[float]
+    """Mirrored x-z heatmaps and integrated profiles for the Core page.
+
+    heatmapFlux and heatmapPower are indexed as [z][x].
+    """
+
+    heatmapXCm: list[float]
     heatmapZCm: list[float]
     heatmapFlux: list[list[float]]
     heatmapPower: list[list[float]]

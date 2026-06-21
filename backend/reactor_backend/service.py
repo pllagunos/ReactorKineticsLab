@@ -51,6 +51,10 @@ class SimulationService:
         self._history_accumulator = 0.0
         self._last_wall_time = time.monotonic()
         self._thermal_state = self._thermal.reset(self._engine.get_snapshot().thermalPowerMw)
+        self._engine.set_thermal_feedback_snapshot(
+            self._thermal_state,
+            reset_reference=True,
+        )
         self._history = [self._current_history_point()]
 
     def _current_history_point(self) -> HistoryPoint:
@@ -84,6 +88,7 @@ class SimulationService:
             dt_seconds,
             reported_power_mw=reported_power_mw,
         )
+        self._engine.set_thermal_feedback_snapshot(self._thermal_state)
 
     def _sync_thermal_to_current_snapshot_locked(self) -> None:
         snapshot = self._engine.get_snapshot()
@@ -193,6 +198,10 @@ class SimulationService:
         with self._lock:
             self._engine.reset()
             self._thermal_state = self._thermal.reset(self._engine.get_snapshot().thermalPowerMw)
+            self._engine.set_thermal_feedback_snapshot(
+                self._thermal_state,
+                reset_reference=True,
+            )
             self._running = True
             self._history_accumulator = 0.0
             self._last_wall_time = time.monotonic()

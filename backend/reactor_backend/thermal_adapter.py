@@ -15,6 +15,21 @@ from .schemas import ThermalSnapshot
 
 AXIAL_NAME_RE = re.compile(r"^axialPowerFractions\[(\d+)\]$")
 
+REQUIRED_FMU_VARIABLES = frozenset(
+    {
+        "totalPower",
+        "T_inlet",
+        "T_outlet",
+        "T_fuelCenterlineMax",
+        "T_fuelEff",
+        "T_moderatorEff",
+        "rho_m_eff_SI",
+        "rho_m_eff",
+        "massFlow",
+        "dp_core",
+    }
+)
+
 
 @dataclass(frozen=True)
 class ThermalAdapterConfig:
@@ -50,6 +65,12 @@ class ThermalAdapter:
     _FALLBACK_TIME_CONSTANT_SECONDS = 25.0
     _FALLBACK_MASS_FLOW_KG_S = 237.0
     _FALLBACK_CORE_DP_PA = 134.43
+    _FALLBACK_FUEL_TO_MODERATOR_DELTA_K_AT_20_MW = 52.7
+    _FALLBACK_D2O_DENSITY_REF_KG_M3 = 1105.0
+    _FALLBACK_D2O_T_REF_K = 300.0
+    _FALLBACK_D2O_P_REF_PA = 4.0e5
+    _FALLBACK_D2O_BETA_1_K = 3.0e-4
+    _FALLBACK_D2O_KAPPA_1_PA = 4.5e-10
 
     def __init__(self, config: Optional[ThermalAdapterConfig] = None) -> None:
         self._config = config or ThermalAdapterConfig()
@@ -59,6 +80,11 @@ class ThermalAdapter:
         self._vr_total_power: Optional[int] = None
         self._vr_inlet_temperature: Optional[int] = None
         self._vr_outlet_temperature: Optional[int] = None
+        self._vr_fuel_maximum_temperature: Optional[int] = None
+        self._vr_fuel_temperature: Optional[int] = None
+        self._vr_moderator_temperature: Optional[int] = None
+        self._vr_moderator_density_si: Optional[int] = None
+        self._vr_moderator_density_cgs: Optional[int] = None
         self._vr_mass_flow: Optional[int] = None
         self._vr_core_dp: Optional[int] = None
         self._vr_axial_profile: list[int] = []
@@ -172,6 +198,11 @@ class ThermalAdapter:
         self._vr_total_power = None
         self._vr_inlet_temperature = None
         self._vr_outlet_temperature = None
+        self._vr_fuel_maximum_temperature = None
+        self._vr_fuel_temperature = None
+        self._vr_moderator_temperature = None
+        self._vr_moderator_density_si = None
+        self._vr_moderator_density_cgs = None
         self._vr_mass_flow = None
         self._vr_core_dp = None
         self._vr_axial_profile = []
@@ -204,6 +235,11 @@ class ThermalAdapter:
             self._vr_total_power = self._required_variable_ref(variable_refs, "totalPower")
             self._vr_inlet_temperature = self._required_variable_ref(variable_refs, "T_inlet")
             self._vr_outlet_temperature = self._required_variable_ref(variable_refs, "T_outlet")
+            self._vr_fuel_maximum_temperature = self._required_variable_ref(variable_refs, "T_fuelCenterlineMax")
+            self._vr_fuel_temperature = self._required_variable_ref(variable_refs, "T_fuelEff")
+            self._vr_moderator_temperature = self._required_variable_ref(variable_refs, "T_moderatorEff")
+            self._vr_moderator_density_si = self._required_variable_ref(variable_refs, "rho_m_eff_SI")
+            self._vr_moderator_density_cgs = self._required_variable_ref(variable_refs, "rho_m_eff")
             self._vr_mass_flow = self._required_variable_ref(variable_refs, "massFlow")
             self._vr_core_dp = self._required_variable_ref(variable_refs, "dp_core")
             self._vr_axial_profile = [value_ref for _, value_ref in axial_refs]
@@ -249,6 +285,9 @@ class ThermalAdapter:
         self._fallback_outlet_temperature_k = (
             outlet_temperature_k if outlet_temperature_k is not None else target_outlet
         )
+        moderator_temperature_k = self._fallback_moderator_temperature()
+        moderator_density_kg_m3 = self._fallback_moderator_density_kg_m3(moderator_temperature_k)
+        fuel_temperature_k = self._fallback_fuel_temperature(power_mw, moderator_temperature_k)
         self._latest = ThermalSnapshot(
             available=True,
             source="fallback",
@@ -256,6 +295,11 @@ class ThermalAdapter:
             powerMw=snapshot_power_mw,
             inletTemperatureK=self._fallback_inlet_temperature_k,
             outletTemperatureK=self._fallback_outlet_temperature_k,
+            fuelMaximumTemperatureK=fuel_temperature_k,
+            fuelTemperatureK=fuel_temperature_k,
+            moderatorTemperatureK=moderator_temperature_k,
+            moderatorDensityKgPerM3=moderator_density_kg_m3,
+            moderatorDensityGPerCm3=moderator_density_kg_m3 / 1000.0,
             massFlowKgPerSecond=self._FALLBACK_MASS_FLOW_KG_S,
             corePressureDropPa=self._FALLBACK_CORE_DP_PA,
             message=message,
@@ -282,6 +326,9 @@ class ThermalAdapter:
             )
             self._time_seconds += dt_seconds
 
+        moderator_temperature_k = self._fallback_moderator_temperature()
+        moderator_density_kg_m3 = self._fallback_moderator_density_kg_m3(moderator_temperature_k)
+        fuel_temperature_k = self._fallback_fuel_temperature(power_mw, moderator_temperature_k)
         self._latest = ThermalSnapshot(
             available=True,
             source="fallback",
@@ -289,6 +336,11 @@ class ThermalAdapter:
             powerMw=snapshot_power_mw,
             inletTemperatureK=self._fallback_inlet_temperature_k,
             outletTemperatureK=self._fallback_outlet_temperature_k,
+            fuelMaximumTemperatureK=fuel_temperature_k,
+            fuelTemperatureK=fuel_temperature_k,
+            moderatorTemperatureK=moderator_temperature_k,
+            moderatorDensityKgPerM3=moderator_density_kg_m3,
+            moderatorDensityGPerCm3=moderator_density_kg_m3 / 1000.0,
             massFlowKgPerSecond=self._FALLBACK_MASS_FLOW_KG_S,
             corePressureDropPa=self._FALLBACK_CORE_DP_PA,
             message=self._latest.message,
@@ -300,17 +352,34 @@ class ThermalAdapter:
         outlet = inlet + self._FALLBACK_DELTA_T_K_PER_MW * power_mw
         return inlet, outlet
 
+    def _fallback_moderator_temperature(self) -> float:
+        return 0.5 * (self._fallback_inlet_temperature_k + self._fallback_outlet_temperature_k)
+
+    def _fallback_fuel_temperature(self, power_mw: float, moderator_temperature_k: float) -> float:
+        power_scale = max(power_mw, 0.0) / 20.0
+        return moderator_temperature_k + self._FALLBACK_FUEL_TO_MODERATOR_DELTA_K_AT_20_MW * power_scale
+
+    def _fallback_moderator_density_kg_m3(self, moderator_temperature_k: float) -> float:
+        density = self._FALLBACK_D2O_DENSITY_REF_KG_M3 * (
+            1.0
+            - self._FALLBACK_D2O_BETA_1_K * (moderator_temperature_k - self._FALLBACK_D2O_T_REF_K)
+            + self._FALLBACK_D2O_KAPPA_1_PA * (4.0e5 - self._FALLBACK_D2O_P_REF_PA)
+        )
+        return max(density, 0.0)
+
     def _ensure_fmu(self) -> Path:
         model_file = self._config.model_file
         fmu_path = self._config.fmu_path
         if (
             fmu_path.exists()
             and fmu_path.stat().st_mtime >= model_file.stat().st_mtime
-            and self._fmu_has_expected_flags(fmu_path)
+            and self._fmu_is_compatible(fmu_path)
         ):
             return fmu_path
 
         self._config.build_dir.mkdir(parents=True, exist_ok=True)
+        fmu_path.unlink(missing_ok=True)
+        export_started_at = model_file.stat().st_mtime
         export_script = self._build_export_script()
         with tempfile.NamedTemporaryFile("w", suffix=".mos", delete=False) as handle:
             handle.write(export_script)
@@ -333,6 +402,8 @@ class ThermalAdapter:
                 "FMU export failed. "
                 + (output[-2000:] if output else "No compiler output was captured.")
             )
+        if fmu_path.stat().st_mtime < export_started_at:
+            raise RuntimeError("FMU export did not produce a fresh FMU artifact.")
 
         return fmu_path
 
@@ -350,6 +421,24 @@ class ThermalAdapter:
             f'buildModelFMU({model_name}, version="2.0", fmuType="cs");\n'
             'getErrorString();\n'
         )
+
+    def _fmu_is_compatible(self, fmu_path: Path) -> bool:
+        if not self._fmu_has_expected_flags(fmu_path):
+            return False
+
+        try:
+            model_description = read_model_description(str(fmu_path))
+        except Exception:
+            return False
+
+        if model_description.coSimulation is None:
+            return False
+
+        variable_names = {variable.name for variable in model_description.modelVariables}
+        if not REQUIRED_FMU_VARIABLES.issubset(variable_names):
+            return False
+
+        return any(AXIAL_NAME_RE.match(name) for name in variable_names)
 
     def _fmu_has_expected_flags(self, fmu_path: Path) -> bool:
         expected = self._config.fmi_flags
@@ -375,6 +464,11 @@ class ThermalAdapter:
         assert self._fmu is not None
         assert self._vr_inlet_temperature is not None
         assert self._vr_outlet_temperature is not None
+        assert self._vr_fuel_maximum_temperature is not None
+        assert self._vr_fuel_temperature is not None
+        assert self._vr_moderator_temperature is not None
+        assert self._vr_moderator_density_si is not None
+        assert self._vr_moderator_density_cgs is not None
         assert self._vr_mass_flow is not None
         assert self._vr_core_dp is not None
 
@@ -382,6 +476,11 @@ class ThermalAdapter:
             [
                 self._vr_inlet_temperature,
                 self._vr_outlet_temperature,
+                self._vr_fuel_maximum_temperature,
+                self._vr_fuel_temperature,
+                self._vr_moderator_temperature,
+                self._vr_moderator_density_si,
+                self._vr_moderator_density_cgs,
                 self._vr_mass_flow,
                 self._vr_core_dp,
             ]
@@ -393,8 +492,13 @@ class ThermalAdapter:
             powerMw=power_mw,
             inletTemperatureK=values[0],
             outletTemperatureK=values[1],
-            massFlowKgPerSecond=values[2],
-            corePressureDropPa=values[3],
+            fuelMaximumTemperatureK=values[2],
+            fuelTemperatureK=values[3],
+            moderatorTemperatureK=values[4],
+            moderatorDensityKgPerM3=values[5],
+            moderatorDensityGPerCm3=values[6],
+            massFlowKgPerSecond=values[7],
+            corePressureDropPa=values[8],
             message=None,
             axialPowerFractions=list(self._axial_profile_values),
         )

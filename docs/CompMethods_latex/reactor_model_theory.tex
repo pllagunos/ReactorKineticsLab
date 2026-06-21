@@ -273,10 +273,23 @@ Here:
 
 \subsection{Constants used by the web app}
 
-The current production constants in \texttt{config.py} are:
+The current production constants in \texttt{config.py} are loaded from the
+published four-group OpenMC MGXS export
+\texttt{openmc/reference\_data/concentric/group\_sweep/group\_4/outputs/mgxs\_constants.json}.
+The backend averages the fuel-ring delayed-neutron data with a fission-source
+weight,
+\[
+w_j = \sum_g \left(\nu\Sigma_f\right)_{j,g}\Phi_{j,g},
+\]
+where $j$ indexes the resolved fuel-ring domains.  The fuel-ring $\beta_i$
+values are \emph{averaged}, not summed across rings.  The prompt neutron
+generation time is taken from the export's \texttt{prompt\_generation\_time\_s}
+tally.
+
+The resulting constants are:
 \begin{align*}
-\beta_{\mathrm{eff}} &= 0.00651 = 651\ \mathrm{pcm}, \\
-\Lambda &= 5\times 10^{-4}\ \mathrm{s}.
+\beta_{\mathrm{eff}} &= 0.00678910882978 = 678.91\ \mathrm{pcm}, \\
+\Lambda &= 0.00417212833712\ \mathrm{s}.
 \end{align*}
 
 The six delayed groups are:
@@ -286,12 +299,12 @@ The six delayed groups are:
 \toprule
 Group & $\beta_i$ & $\lambda_i$ [s$^{-1}$] \\
 \midrule
-1 & 0.00025 & 0.0124 \\
-2 & 0.00138 & 0.0305 \\
-3 & 0.00122 & 0.1110 \\
-4 & 0.00264 & 0.3010 \\
-5 & 0.00075 & 1.1400 \\
-6 & 0.00027 & 3.0100 \\
+1 & 0.000227917094163 & 0.0133443203744 \\
+2 & 0.00119534670498 & 0.0326776283533 \\
+3 & 0.00115198689522 & 0.120914791504 \\
+4 & 0.00262514724228 & 0.304202879275 \\
+5 & 0.00112075519129 & 0.855415421400 \\
+6 & 0.000467955701846 & 2.87295916880 \\
 \bottomrule
 \end{tabular}
 \end{center}
@@ -329,6 +342,32 @@ x_{\mathrm{crit}} &\approx 0.265, \\
 The backend interpolates linearly between the insertion points stored in the
 CSV.  The older diffusion-derived constants remain only as parameters for the
 legacy one-group spatial display model.
+
+\subsection{Thermal reactivity feedback}
+
+The point model also adds thermal feedback when the Modelica FMU reports all
+three effective feedback signals:
+\texttt{T\_fuelEff}, \texttt{T\_moderatorEff}, and \texttt{rho\_m\_eff}.  The
+coefficients are loaded from
+\texttt{openmc/reference\_data/concentric/reactivity\_coefficients/results/reactivity\_coefficients.csv}:
+\begin{align*}
+\alpha_f &= -2.138272335\ \mathrm{pcm/K}, \\
+\alpha_{m,T} &= -10.72767894\ \mathrm{pcm/K}, \\
+\alpha_{m,\rho} &= 20993.04779\ \mathrm{pcm/(g/cm^3)}.
+\end{align*}
+
+At reset, the current FMU effective state is stored as the zero-feedback
+reference.  Runtime feedback is then
+\[
+\rho_{\mathrm{fb,pcm}} =
+\alpha_f \left(T_{f,eff}-T_{f,0}\right)
++ \alpha_{m,T}\left(T_{m,eff}-T_{m,0}\right)
++ \alpha_{m,\rho}\left(\rho_{m,eff}-\rho_{m,0}\right).
+\]
+This preserves the existing critical startup behavior while still using the
+OpenMC finite-difference slopes.  Thermal feedback is \textbf{FMI-only}: if the
+FMU is unavailable and the fallback thermal model is active, the feedback terms
+are reported as zero and are not added to reactivity.
 
 \subsection{Numerical method}
 
@@ -1249,17 +1288,25 @@ CLI entry point \texttt{backend/openmc\_to\_diffusion.py} exposes a
 The web backend now exposes the four-group rod-aware model through
 \texttt{GET /api/multigroup-diffusion/state} and
 \texttt{POST /api/multigroup-diffusion/recompute}.  The service is initialized
-lazily.  It loads the persisted clean solution immediately and derives the
-fixed clean CE power-shape factor when a CE power mesh is available.  Each
-response reads the current rod insertion from the point-kinetics simulation,
-solves or reuses the corresponding rodded multigroup diffusion state, and
-applies the fixed clean factor to the rodded diffusion power map.
-The frontend names this view \textbf{Core}; the backend route names remain
-\texttt{multigroup-diffusion} for compatibility.
+lazily.  Its default path intentionally matches
+\texttt{openmc/diffusion\_concentric\_reactor.ipynb}: four energy groups,
+the \texttt{groupwise\_fvm} boundary treatment, 0.1/1/5/20 cm radial mesh
+targets for fuel/coolant/moderator/reflector, and a 10 cm axial target.  The
+clean unrodded solve gives
+$k_{\mathrm{eff}}=1.001429$ ($+142.7$ pcm relative to critical), within about
+$1$ pcm of the clean continuous-energy OpenMC reference.
 
-If no valid SPH factor artifact is present, the endpoint still exposes the
-uncorrected flux calculation and the post-solve power-map correction but marks
-the result provisional and unqualified.  Rodded maps are also marked
+The flux map shown by the frontend is the raw four-group diffusion scalar flux,
+mirrored from cylindrical $r$-$z$ into an axisymmetric $x$-$z$ image.  Power is
+displayed with the fixed clean CE power-shape factor when a CE power mesh is
+available.  Each response reads the current rod insertion from the
+point-kinetics simulation, solves or reuses the corresponding rodded
+multigroup diffusion state, and applies the fixed clean factor to the rodded
+diffusion power map.  The frontend names this view \textbf{Core}; the backend
+route names remain \texttt{multigroup-diffusion} for compatibility.
+
+SPH fitting and qualification remain available in the offline workflow, but
+the online Core page does not apply SPH factors.  Rodded maps are marked
 provisional because they use an equivalent absorber, not rodded MGXS or
 rod-dependent transport corrections.  Reactivity remains tied to the OpenMC CE
 rod-worth CSV, not to the equivalent diffusion rod-worth scan.

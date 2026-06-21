@@ -1,7 +1,7 @@
 import type { ReactorSnapshot, ThermalSnapshot } from '../simulation/types'
 import {
+  formatDensityGPerCm3,
   formatMassFlow,
-  formatPressureDropPa,
   formatTemperatureK,
 } from '../utils/format'
 
@@ -82,8 +82,11 @@ function ValueBadge({
 export function CoolingLoopDiagram({ thermal, snapshot }: Props) {
   const tIn = formatTemperatureK(thermal?.inletTemperatureK ?? null)
   const tOut = formatTemperatureK(thermal?.outletTemperatureK ?? null)
+  const tFuelMax = formatTemperatureK(thermal?.fuelMaximumTemperatureK ?? null)
+  const tFuelAvg = formatTemperatureK(thermal?.fuelTemperatureK ?? null)
+  const tModeratorAvg = formatTemperatureK(thermal?.moderatorTemperatureK ?? null)
+  const moderatorDensity = formatDensityGPerCm3(thermal?.moderatorDensityGPerCm3 ?? null)
   const mDot = formatMassFlow(thermal?.massFlowKgPerSecond ?? null)
-  const dP = formatPressureDropPa(thermal?.corePressureDropPa ?? null)
   const rodInsertion = snapshot?.rodInsertionPercent ?? 0
   const isScrammed = snapshot?.scramLatched ?? false
 
@@ -357,21 +360,6 @@ export function CoolingLoopDiagram({ thermal, snapshot }: Props) {
           RESEARCH REACTOR
         </text>
 
-        {/* ── ΔP differential reference lines ── */}
-        {/* Connects the ΔP badge (at ~310,200) to the two plenum pipe exits */}
-        <line
-          x1={256} y1={200} x2={220} y2={93}
-          stroke="rgba(167,139,250,0.28)"
-          strokeWidth={1}
-          strokeDasharray="4 3"
-        />
-        <line
-          x1={256} y1={200} x2={220} y2={307}
-          stroke="rgba(167,139,250,0.28)"
-          strokeWidth={1}
-          strokeDasharray="4 3"
-        />
-
         {/* ══════════════════════════════════════════════════════════════════
             HEAT EXCHANGER
         ══════════════════════════════════════════════════════════════════ */}
@@ -531,12 +519,32 @@ export function CoolingLoopDiagram({ thermal, snapshot }: Props) {
           accentColor="rgba(74,222,128,0.72)"
         />
 
-        {/* ΔP — between pipe exits, right of vessel */}
         <ValueBadge
-          cx={310} cy={200}
-          label="ΔP CORE"
-          value={dP}
-          accentColor="rgba(167,139,250,0.72)"
+          cx={316} cy={150}
+          label="FUEL MAX"
+          value={tFuelMax}
+          accentColor="rgba(248,113,113,0.72)"
+        />
+
+        <ValueBadge
+          cx={316} cy={212}
+          label="FUEL AVG"
+          value={tFuelAvg}
+          accentColor="rgba(251,191,36,0.72)"
+        />
+
+        <ValueBadge
+          cx={438} cy={150}
+          label="MOD AVG"
+          value={tModeratorAvg}
+          accentColor="rgba(56,189,248,0.72)"
+        />
+
+        <ValueBadge
+          cx={438} cy={212}
+          label="MOD RHO"
+          value={moderatorDensity}
+          accentColor="rgba(45,212,191,0.72)"
         />
       </svg>
     </article>

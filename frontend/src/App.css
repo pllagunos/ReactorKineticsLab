@@ -503,19 +503,33 @@ input[type='range'] {
 
 /* ── Core page — resolved multigroup diffusion ──────────── */
 
-.multigroup-control-bar {
-  padding: 1rem 1.25rem;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
+.core-summary-panel {
+  padding: 0.9rem 1rem;
 }
 
-.multigroup-control-bar__detail {
-  display: block;
-  margin-top: 0.4rem;
+.core-result {
+  display: flex;
+  align-items: center;
+  gap: 1.1rem;
+  flex-wrap: wrap;
+}
+
+.core-result .button {
+  margin-left: auto;
+}
+
+.core-result__label {
+  color: var(--text-dim);
+  font-size: 0.85rem;
+}
+
+.core-result strong {
+  color: var(--text-strong);
+  font-size: 1.25rem;
+}
+
+.core-result > span:not(.core-result__label) {
   color: var(--text-muted);
-  font-size: 0.88rem;
 }
 
 .multigroup-map-grid,
@@ -525,48 +539,54 @@ input[type='range'] {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.core-visual-grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1.1fr) minmax(16rem, 0.82fr);
+  align-items: start;
+}
+
+.profile-stack {
+  display: grid;
+  gap: 0.75rem;
+}
+
 .multigroup-map-card,
 .multigroup-profile-card {
-  padding: 1.25rem;
+  padding: 0.85rem;
 }
 
 .multigroup-map-card h2,
 .multigroup-profile-card h3 {
-  margin: 0 0 1rem;
+  margin: 0 0 0.75rem;
 }
 
 .multigroup-map {
   width: 100%;
+  margin: 0 auto;
   display: block;
-  border-radius: 0.65rem;
-  overflow: hidden;
 }
 
-.multigroup-scale {
-  display: flex;
-  align-items: center;
-  gap: 0.65rem;
-  margin-top: 0.7rem;
-  color: var(--text-dim);
-  font-size: 0.8rem;
+.axis-line {
+  stroke: rgba(203, 213, 225, 0.64);
+  stroke-width: 1;
 }
 
-.multigroup-scale__bar {
-  height: 8px;
-  flex: 1;
-  border-radius: 999px;
-  background: linear-gradient(90deg, hsl(205 82% 15%), hsl(170 82% 73%));
+.axis-label {
+  fill: var(--text-muted);
+  font-size: 12px;
 }
 
-.multigroup-scale--power .multigroup-scale__bar {
-  background: linear-gradient(90deg, hsl(36 82% 15%), hsl(12 82% 73%));
+.axis-title {
+  fill: var(--text-strong);
+  font-size: 13px;
 }
 
 .multigroup-details {
-  padding: 1.25rem;
+  padding: 0.9rem 1rem;
   display: grid;
   gap: 1rem;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .multigroup-details div {
@@ -585,15 +605,20 @@ input[type='range'] {
 }
 
 @media (max-width: 900px) {
+  .core-visual-grid,
   .multigroup-map-grid,
   .multigroup-profile-grid,
   .multigroup-details {
     grid-template-columns: 1fr;
   }
 
-  .multigroup-control-bar {
+  .core-result {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .core-result .button {
+    margin-left: 0;
   }
 }
 
@@ -653,7 +678,8 @@ input[type='range'] {
 .overview-hmi-row {
   display: grid;
   gap: 0.85rem;
-  grid-template-columns: 88px minmax(0, 1fr);
+  grid-template-columns: 88px minmax(950px, 1.75fr) minmax(400px, 1.0fr);
+  align-items: stretch;
 }
 
 .overview-controls {
@@ -718,12 +744,21 @@ input[type='range'] {
   text-align: center;
 }
 
-/* ── Trend charts row ──────────────────────────────────── */
+/* ── Trend charts stack ────────────────────────────────── */
 
-.overview-trends-row {
+.overview-trends-stack {
   display: grid;
   gap: 0.85rem;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-rows: repeat(2, minmax(0, 1fr));
+  min-width: 0;
+}
+
+.overview-trends-stack .chart-card {
+  min-width: 0;
+}
+
+.overview-trends-stack .chart-card__canvas-wrap {
+  height: 156px;
 }
 
 /* ── Info footer ───────────────────────────────────────── */
@@ -775,4 +810,41 @@ input[type='range'] {
   position: relative;
   width: 100%;
   height: 210px;
+}
+
+@media (max-width: 1180px) {
+  .overview-hmi-row {
+    grid-template-columns: 88px minmax(0, 1fr);
+  }
+
+  .overview-trends-stack {
+    grid-column: 1 / -1;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-rows: none;
+  }
+
+  .overview-trends-stack .chart-card__canvas-wrap {
+    height: 190px;
+  }
+}
+
+@media (max-width: 760px) {
+  .overview-stat-row,
+  .overview-hmi-row,
+  .overview-trends-stack {
+    grid-template-columns: 1fr;
+  }
+
+  .overview-stat-row {
+    flex-direction: column;
+  }
+
+  .overview-controls {
+    flex-direction: row;
+    align-items: stretch;
+  }
+
+  .slider-vertical {
+    height: 120px;
+  }
 }

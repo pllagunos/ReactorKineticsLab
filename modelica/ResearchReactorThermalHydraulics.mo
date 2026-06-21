@@ -4,7 +4,7 @@ model ResearchReactorThermalHydraulics
                         -> outlet plenum -> pump -> HX primary pipe -> inlet plenum.
   The reactor pool is represented as an open thermal reservoir coupled to the
   primary loop only through heat transfer; it is not hydraulically connected.
-  The inlet plenum is modeled as an open expansion volume that provides the loop pressure reference.
+  The inlet plenum is modeled as a closed compliance volume with a fixed loop pressure reference.
    Secondary side: fixed-temperature heat sink at 20 degC, UA = 1.33 MW/K.
    Architecture reference: ReactorKineticsLab/theory/ThermalHydraulics.tex"
 
@@ -57,14 +57,8 @@ model ResearchReactorThermalHydraulics
     "Lumped thermal coupling between inlet plenum and reactor pool [W/K]";
   parameter Modelica.Units.SI.ThermalConductance G_pool_ambient = 2.0e4
     "Lumped ambient heat-loss conductance from the open pool [W/K]";
-  parameter Modelica.Units.SI.Height inletPlenumHeight = 2.0
-    "Open expansion-plenum height used for pressure reference [m]";
-  parameter Modelica.Units.SI.Height inletPlenumLevel_start = 1.0
-    "Initial open expansion-plenum level [m]";
-  parameter Modelica.Units.SI.Area inletPlenumCrossArea = 4.0 / inletPlenumLevel_start
-    "Open expansion-plenum cross-sectional area preserving the previous 4 m3 inventory [m2]";
-  parameter Modelica.Units.SI.AbsolutePressure inletPlenumSurfacePressure = 3.90e5
-    "Expansion-plenum surface pressure; plus hydrostatic head gives about 4 bar at ports [Pa]";
+  parameter Modelica.Units.SI.AbsolutePressure p_loop_ref = 4.0e5
+    "Primary-loop absolute pressure reference used to anchor the FMU pressure level [Pa]";
   parameter Integer nFuelRadialNodes(min = 2) = 5
     "Radial nodes in the fuel-meat half-slab heat structure";
   parameter Integer fuelRingCount(min = 1) = 6
@@ -159,21 +153,24 @@ model ResearchReactorThermalHydraulics
     massDynamics = Modelica.Fluid.Types.Dynamics.DynamicFreeInitial)
     annotation(Placement(transformation(origin = {150, 4}, extent = {{-90, 70}, {-70, 90}})));
 
-// ── Inlet plenum / expansion volume (top of core pressure reference) ────
-  Modelica.Fluid.Vessels.OpenTank inletPlenum(
+// ── Inlet plenum (top of core pressure state) ────────────────────────────
+  Modelica.Fluid.Vessels.ClosedVolume inletPlenum(
     redeclare package Medium = Medium,
-    height      = inletPlenumHeight,
-    crossArea   = inletPlenumCrossArea,
-    level_start = inletPlenumLevel_start,
-    nPorts      = 2,
+    V           = 4.0,
+    nPorts      = 3,
     use_portsData = false,
     use_HeatTransfer = true,
-    p_ambient   = inletPlenumSurfacePressure,
+    p_start     = p_loop_ref,
     T_start     = T_core_in_start,
-    T_ambient   = system.T_ambient,
-    massDynamics = Modelica.Fluid.Types.Dynamics.FixedInitial,
     ports_H_flow(each min = -2.0e8, each max = 2.0e8))
     annotation(Placement(transformation(origin = {8, 26}, extent = {{-24, 36}, {-12, 48}})));
+
+  Modelica.Fluid.Sources.Boundary_pT pressureReference(
+    redeclare package Medium = Medium,
+    nPorts = 1,
+    p = p_loop_ref,
+    T = T_core_in_start)
+    annotation(Placement(transformation(origin = {-34, 80}, extent = {{-12, -10}, {8, 10}})));
 
 // ── Reactor pool (thermal reservoir only; no hydraulic coupling) ─────────
   Modelica.Fluid.Vessels.OpenTank poolInventory(
@@ -478,7 +475,8 @@ equation
     sum({fuelNode[i, r].T for r in 1:nFuelRadialNodes}) / nFuelRadialNodes
     for i in 1:nAxialNodes});
   for i in 1:nAxialNodes loop
-    p_coreNode[i] = core.flowModel.states[i].p;
+    p_coreNode[i] = sensor_p_in.p -
+      ((i - 0.5) / nAxialNodes) * (sensor_p_in.p - sensor_p_out.p);
     T_coreNode[i] = core.heatPorts[i].T;
   end for;
   T_moderatorEff = sum({normalizedFractions[i] * T_coreNode[i]
@@ -501,6 +499,8 @@ equation
     annotation(Line(points = {{52, 36}, {52, 62}, {34, 62}}, color = {0, 127, 255}));
   connect(returnPipe.port_b, inletPlenum.ports[1]) annotation(
     Line(points = {{14, 62}, {-10, 62}}, color = {0, 127, 255}));
+  connect(pressureReference.ports[1], inletPlenum.ports[3]) annotation(
+    Line(points = {{-26, 80}, {-10, 80}, {-10, 62}}, color = {0, 127, 255}));
 // ── Sensor port taps (zero-flow connections to existing fluid nodes) ───────
   connect(poolInventory.heatPort, poolAmbientLoss.port_a) annotation(
     Line(points = {{-74, 57}, {-96, 57}, {-96, 35}, {-92, 35}}, color = {191, 0, 0}));
@@ -548,8 +548,9 @@ D<sub>2</sub>O primary loop).  Architecture specified in
 <li>The reactor pool is modeled as an open thermal reservoir coupled to the
   inlet plenum only through heat transfer. It is not hydraulically connected
   to the primary loop.</li>
-<li>The inlet plenum is an open expansion volume that provides the
-  primary-loop pressure reference without hydraulically connecting the pool.</li>
+<li>The inlet plenum is a closed compliance volume with a fixed 4&nbsp;bar
+  pressure-reference boundary. This anchors the FMU pressure level without
+  hydraulically connecting the pool.</li>
 <li>Design operating point: 25&nbsp;&deg;C inlet, 45&nbsp;&deg;C outlet,
   237&nbsp;kg/s, ~4&nbsp;bar absolute system pressure.</li>
 <li>Flow-controlled pump (constant 237&nbsp;kg/s).  Replace

@@ -4,7 +4,7 @@ export function NavBar() {
   return (
     <nav className="nav-bar" aria-label="Main navigation">
       <div className="nav-bar__inner">
-        <span className="nav-bar__brand">⚛ Reactor Sim</span>
+        <span className="nav-bar__brand">⚛ Reactor Lab</span>
         <div className="nav-bar__links">
           <NavLink
             to="/overview"

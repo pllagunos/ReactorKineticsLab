@@ -10,8 +10,9 @@ from typing import Any
 
 import numpy as np
 
+from .diffusion import rho_pcm
 from .multigroup_diffusion import (
-    BOUNDARY_EXTRAPOLATED_MESH,
+    BOUNDARY_GROUPWISE_FVM,
     ConcentricMeshSpacing,
     _power_density,
     build_multigroup_2d_system,
@@ -23,19 +24,13 @@ from .multigroup_diffusion_cache import (
     PreparedDiffusionCase,
     prepare_concentric_diffusion_cache,
 )
-from .multigroup_sph import (
-    SphFactorSet,
-    corrected_regions,
-    evaluate_sph_qualification,
-    load_sph_factors,
-    sph_diffusion_input,
-)
 from .openmc_mgxs_adapter import load_concentric_diffusion_input
 from .power_shape import (
     PowerShapeCorrection,
     apply_ce_power_shape_correction,
     apply_fixed_power_shape_factor,
 )
+from .reactivity import compute_reactivity
 from .schemas import (
     MultigroupDiffusionGeometry,
     MultigroupDiffusionMetadata,
@@ -57,6 +52,13 @@ _DISPLAY_NR = 80
 _DISPLAY_NZ = 100
 _ROD_DELTA_ABSORPTION_CM_INV = 0.017
 _ROD_CACHE_INSERTION_DECIMALS = 3
+_NOTEBOOK_MESH_SPACING = ConcentricMeshSpacing(
+    fuel_radial_cm=0.1,
+    core_coolant_radial_cm=1.0,
+    moderator_radial_cm=5.0,
+    reflector_radial_cm=20.0,
+    axial_cm=10.0,
+)
 
 
 @dataclass(frozen=True)
@@ -65,14 +67,6 @@ class _SolvedState:
     solution: dict[str, Any]
     cached: bool
     rod_insertion_percent: float
-
-
-def _spacing_from_factors(
-    factors: SphFactorSet | None,
-) -> ConcentricMeshSpacing:
-    if factors is None:
-        return ConcentricMeshSpacing()
-    return ConcentricMeshSpacing(**factors.mesh_spacing)
 
 
 def _downsample_indices(size: int, target: int) -> np.ndarray:
@@ -88,6 +82,33 @@ def _normalized(values: np.ndarray) -> np.ndarray:
     return values / maximum
 
 
+def _scale_by(values: np.ndarray, scale: float) -> np.ndarray:
+    if not np.isfinite(scale) or scale <= 0.0:
+        return np.zeros_like(values)
+    return values / scale
+
+
+def _mirror_radial_to_xz(values_rz: np.ndarray) -> np.ndarray:
+    values = np.asarray(values_rz, dtype=float)
+    if values.ndim != 2:
+        raise ValueError("Expected a 2D radial-axial field")
+    return np.concatenate((values[::-1, :], values), axis=0).T
+
+
+def _mirror_radial_profile(
+    axis_r_cm: np.ndarray,
+    values_r: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
+    axis = np.asarray(axis_r_cm, dtype=float).reshape(-1)
+    values = np.asarray(values_r, dtype=float).reshape(-1)
+    if axis.size != values.size:
+        raise ValueError("Radial profile axis and values must have equal length")
+    return (
+        np.concatenate((-axis[::-1], axis)),
+        np.concatenate((values[::-1], values)),
+    )
+
+
 class MultigroupDiffusionService:
     def __init__(self) -> None:
         self._lock = threading.RLock()
@@ -95,43 +116,28 @@ class MultigroupDiffusionService:
         self._rod_cache: dict[float, tuple[Any, dict[str, Any]]] = {}
         self._clean_power_shape: PowerShapeCorrection | None = None
 
-    def _paths(self) -> tuple[Path, Path]:
+    def _paths(self) -> Path:
         export_dir = Path(
             os.environ.get(
                 "MULTIGROUP_MGXS_EXPORT_DIR",
                 str(_DEFAULT_EXPORT_DIR),
             )
         ).expanduser()
-        factor_path = Path(
-            os.environ.get(
-                "MULTIGROUP_SPH_FACTORS_PATH",
-                str(export_dir / "outputs" / "sph_factors.json"),
-            )
-        ).expanduser()
-        return export_dir.resolve(), factor_path.resolve()
+        return export_dir.resolve()
 
     def _initialize(self) -> None:
         if self._prepared is not None:
             return
-        export_dir, factor_path = self._paths()
+        export_dir = self._paths()
         diffusion_input = load_concentric_diffusion_input(export_dir)
         if diffusion_input.group_count != 4:
             raise ValueError(
                 "The online multigroup page requires a four-group MGXS export"
             )
-        factors = (
-            load_sph_factors(factor_path)
-            if factor_path.is_file()
-            else None
-        )
-        spacing = _spacing_from_factors(factors)
+        spacing = _NOTEBOOK_MESH_SPACING
         boundary_condition = os.environ.get(
             "MULTIGROUP_BOUNDARY_CONDITION",
-            (
-                factors.boundary_condition
-                if factors is not None
-                else BOUNDARY_EXTRAPOLATED_MESH
-            ),
+            BOUNDARY_GROUPWISE_FVM,
         )
         cache_root = Path(
             os.environ.get(
@@ -144,9 +150,14 @@ class MultigroupDiffusionService:
             settings=DiffusionCacheSettings(
                 spacing=spacing,
                 boundary_condition=boundary_condition,
+                max_iter=300,
+                tol=1.0e-5,
+                source_tol=1.0e-3,
+                max_inner_iter=200,
+                inner_tol=1.0e-4,
             ),
             cache_root=cache_root,
-            sph_factors=factors,
+            sph_factors=None,
         )
         self._prepared = prepared
         self._rod_cache[0.0] = (prepared.system, prepared.clean_solution)
@@ -196,26 +207,10 @@ class MultigroupDiffusionService:
             system = prepared.system
             phi0 = prepared.clean_solution["phi_groups"]
         else:
-            if prepared.sph_factors is None:
-                model = prepared.diffusion_input.build_model(
-                    delta_absorption_rod=_ROD_DELTA_ABSORPTION_CM_INV,
-                    boundary_condition=prepared.system.model.boundary_condition,
-                )
-            else:
-                adjusted_input = sph_diffusion_input(
-                    prepared.diffusion_input,
-                    prepared.sph_factors,
-                )
-                regions = corrected_regions(
-                    prepared.diffusion_input,
-                    prepared.sph_factors,
-                    _spacing_from_factors(prepared.sph_factors),
-                )
-                model = adjusted_input.build_model(
-                    delta_absorption_rod=_ROD_DELTA_ABSORPTION_CM_INV,
-                    regions=regions,
-                    boundary_condition=prepared.system.model.boundary_condition,
-                )
+            model = prepared.diffusion_input.build_model(
+                delta_absorption_rod=_ROD_DELTA_ABSORPTION_CM_INV,
+                boundary_condition=prepared.system.model.boundary_condition,
+            )
             system = build_multigroup_2d_system(
                 model,
                 mesh=prepared.system.mesh,
@@ -227,7 +222,7 @@ class MultigroupDiffusionService:
             system,
             phi0=phi0,
             max_iter=300,
-            tol=1.0e-6,
+            tol=1.0e-5,
             source_tol=1.0e-3,
             max_inner_iter=200,
             inner_tol=1.0e-4,
@@ -292,20 +287,24 @@ class MultigroupDiffusionService:
                 ),
             }
         if self._prepared.sph_factors is None:
+            reference = self._prepared.diffusion_input.openmc_reference
+            difference_pcm = abs(
+                (float(state.solution["k_eff"]) - reference["keff"]) * 1.0e5
+            )
+            tolerance_pcm = max(10.0, reference["keff_std_dev"] * 3.0e5)
+            qualified = difference_pcm <= tolerance_pcm
             return {
-                "qualified": False,
-                "provisional": True,
+                "qualified": qualified,
+                "provisional": not qualified,
                 "reason": (
-                    "No matching SPH factor artifact is installed; displaying "
-                    "the uncorrected clean-core solution."
+                    "Clean four-group diffusion uses the notebook mesh and "
+                    "groupwise finite-volume boundary; power is corrected "
+                    "with the clean continuous-energy OpenMC shape."
                 ),
+                "difference_pcm": difference_pcm,
+                "tolerance_pcm": tolerance_pcm,
             }
-        return evaluate_sph_qualification(
-            self._prepared.diffusion_input,
-            state.system,
-            state.solution,
-            self._prepared.sph_factors,
-        )
+        raise RuntimeError("The Core service no longer applies SPH factors")
 
     def _response(self, state: _SolvedState) -> MultigroupDiffusionResponse:
         assert self._prepared is not None
@@ -315,6 +314,11 @@ class MultigroupDiffusionService:
         solution = state.solution
         phi_groups = np.asarray(solution["phi_groups"], dtype=float)
         total_flux = np.sum(phi_groups, axis=0)
+        clean_phi_groups = np.asarray(
+            prepared.clean_solution["phi_groups"],
+            dtype=float,
+        )
+        clean_total_flux = np.sum(clean_phi_groups, axis=0)
         power_density = self._power_density_for(system, solution)
         volumes = system.mesh.volumes.reshape(
             system.mesh.nr,
@@ -329,27 +333,69 @@ class MultigroupDiffusionService:
                 correction_factor=self._clean_power_shape.correction_factor,
             )
         displayed_power_density = power_shape.corrected_power_density
-        flux_rate = total_flux * volumes
         power_rate = power_shape.corrected_power_rate
 
-        r_indices = _downsample_indices(system.mesh.nr, _DISPLAY_NR)
-        z_indices = _downsample_indices(system.mesh.nz, _DISPLAY_NZ)
-        displayed_flux = _normalized(
-            total_flux[np.ix_(r_indices, z_indices)]
+        moderator_radius = float(
+            prepared.diffusion_input.geometry["moderator_radius_cm"]
         )
-        displayed_power = _normalized(
-            displayed_power_density[np.ix_(r_indices, z_indices)]
+        moderator_edges = np.flatnonzero(
+            np.isclose(
+                system.mesh.r_edges,
+                moderator_radius,
+                rtol=0.0,
+                atol=1.0e-8,
+            )
+        )
+        radial_display_count = (
+            int(moderator_edges[-1])
+            if moderator_edges.size
+            else system.mesh.nr
+        )
+        r_indices = _downsample_indices(radial_display_count, _DISPLAY_NR)
+        z_indices = _downsample_indices(system.mesh.nz, _DISPLAY_NZ)
+        clean_flux_display = clean_total_flux[np.ix_(r_indices, z_indices)]
+        clean_power_display = self._clean_power_shape.corrected_power_density[
+            np.ix_(r_indices, z_indices)
+        ]
+        displayed_flux_rz = _scale_by(
+            total_flux[np.ix_(r_indices, z_indices)],
+            float(np.max(clean_flux_display)),
+        )
+        displayed_power_rz = _scale_by(
+            displayed_power_density[np.ix_(r_indices, z_indices)],
+            float(np.max(clean_power_display)),
+        )
+        displayed_flux = _mirror_radial_to_xz(displayed_flux_rz)
+        displayed_power = _mirror_radial_to_xz(displayed_power_rz)
+        heatmap_x_cm = np.concatenate(
+            (
+                -system.mesh.r_grid[r_indices][::-1],
+                system.mesh.r_grid[r_indices],
+            )
         )
         radial_widths = np.diff(system.mesh.r_edges)
         axial_widths = np.diff(system.mesh.z_edges)
-        radial_flux = _normalized(
-            np.sum(flux_rate, axis=1) / radial_widths
+        midplane_index = int(np.argmin(np.abs(system.mesh.z_grid)))
+        probe_radius = 0.5 * float(prepared.diffusion_input.geometry["core_radius_cm"])
+        probe_radial_index = int(np.argmin(np.abs(system.mesh.r_grid - probe_radius)))
+        radial_profile = slice(0, radial_display_count)
+        radial_flux_axis, radial_flux_values = _mirror_radial_profile(
+            system.mesh.r_grid[radial_profile],
+            _scale_by(
+                total_flux[radial_profile, midplane_index],
+                float(np.max(clean_total_flux[radial_profile, midplane_index])),
+            ),
         )
-        axial_flux = _normalized(
-            np.sum(flux_rate, axis=0) / axial_widths
+        axial_flux = _scale_by(
+            total_flux[probe_radial_index, :],
+            float(np.max(clean_total_flux[probe_radial_index, :])),
         )
-        radial_power = _normalized(
-            np.sum(power_rate, axis=1) / radial_widths
+        radial_power_axis, radial_power_values = _mirror_radial_profile(
+            system.mesh.r_grid[radial_profile],
+            _normalized(
+                np.sum(power_rate[radial_profile, :], axis=1)
+                / radial_widths[radial_profile]
+            ),
         )
         axial_power = _normalized(
             np.sum(power_rate, axis=0) / axial_widths
@@ -360,21 +406,21 @@ class MultigroupDiffusionService:
         spacing = prepared.manifest["settings"]["spacing"]
         factor_set = prepared.sph_factors
         return MultigroupDiffusionResponse(
-            heatmapRCm=system.mesh.r_grid[r_indices].tolist(),
+            heatmapXCm=heatmap_x_cm.tolist(),
             heatmapZCm=system.mesh.z_grid[z_indices].tolist(),
             heatmapFlux=displayed_flux.tolist(),
             heatmapPower=displayed_power.tolist(),
             radialFlux=MultigroupDiffusionProfile(
-                axisCm=system.mesh.r_grid.tolist(),
-                values=radial_flux.tolist(),
+                axisCm=radial_flux_axis.tolist(),
+                values=radial_flux_values.tolist(),
             ),
             axialFlux=MultigroupDiffusionProfile(
                 axisCm=system.mesh.z_grid.tolist(),
                 values=axial_flux.tolist(),
             ),
             radialPower=MultigroupDiffusionProfile(
-                axisCm=system.mesh.r_grid.tolist(),
-                values=radial_power.tolist(),
+                axisCm=radial_power_axis.tolist(),
+                values=radial_power_values.tolist(),
             ),
             axialPower=MultigroupDiffusionProfile(
                 axisCm=system.mesh.z_grid.tolist(),
@@ -399,6 +445,11 @@ class MultigroupDiffusionService:
                 cleanCore=system.x_insert == 0.0,
                 groupCount=system.group_count,
                 kEff=float(solution["k_eff"]),
+                reactivityPcm=rho_pcm(float(solution["k_eff"])),
+                openmcCeReactivityPcm=compute_reactivity(
+                    state.rod_insertion_percent,
+                    False,
+                ).totalPcm,
                 openmcReferenceKEff=reference["keff"],
                 openmcReferenceStdDevPcm=reference["keff_std_dev"] * 1.0e5,
                 differencePcm=(

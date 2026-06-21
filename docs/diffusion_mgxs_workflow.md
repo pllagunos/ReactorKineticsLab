@@ -94,7 +94,15 @@ The diffusion solver supports three vacuum-boundary treatments for testing:
 
 ## Mesh Qualification
 
-SPH factors are mesh dependent, so the production mesh is selected before
+The frontend Core page follows the notebook display path: raw four-group
+diffusion with `groupwise_fvm`, 0.1/1/5/20 cm radial mesh targets for
+fuel/coolant/moderator/reflector, and a 10 cm axial target. That clean
+unrodded service path has 13,500 cells and gives `k_eff = 1.001429`, matching
+`openmc/diffusion_concentric_reactor.ipynb`. The displayed flux is mirrored
+from cylindrical r-z into x-z; displayed power uses the clean CE power-shape
+correction.
+
+SPH factors are mesh dependent, so the SPH reference mesh is selected before
 fitting. The tested meshes were:
 
 | Mesh | Fuel/coolant/moderator/reflector radial targets | Axial target | Cells | Runtime |
@@ -106,7 +114,9 @@ The candidate changed `k_eff` by only +5.52 pcm, but it failed the field
 criteria: the maximum resolved region/group flux error was 35.3% in the
 parked-control-rod region, and radial/axial power-shape RMS errors were 4.30%
 and 3.07%. The required limits are 0.5% flux and 1% RMS power shape.
-Consequently the 15,096-cell reference mesh remains the production mesh.
+Consequently the 15,096-cell reference mesh remains the archived SPH fitting
+mesh, while the online Core page uses the notebook display mesh described
+above.
 
 Power profiles are compared as line-power density, not raw per-bin power, so
 different bin widths do not enter the error metric as a false shape change.

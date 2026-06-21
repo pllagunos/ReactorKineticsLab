@@ -36,9 +36,14 @@ export type SimulationTuning = {
 export type ReactivitySnapshot = {
   baseExcessPcm: number
   dollars: number
+  fuelTemperatureFeedbackPcm: number
+  moderatorDensityFeedbackPcm: number
+  moderatorTemperatureFeedbackPcm: number
   rodContributionPcm: number
   rodInsertionPercent: number
   scramPenaltyPcm: number
+  thermalFeedbackApplied: boolean
+  thermalFeedbackPcm: number
   totalDeltaK: number
   totalPcm: number
 }
@@ -62,6 +67,11 @@ export type ThermalSnapshot = {
   powerMw: number
   inletTemperatureK: number | null
   outletTemperatureK: number | null
+  fuelMaximumTemperatureK: number | null
+  fuelTemperatureK: number | null
+  moderatorTemperatureK: number | null
+  moderatorDensityKgPerM3: number | null
+  moderatorDensityGPerCm3: number | null
   massFlowKgPerSecond: number | null
   corePressureDropPa: number | null
   message: string | null
@@ -106,6 +116,8 @@ export type MultigroupDiffusionMetadata = {
   cleanCore: boolean
   groupCount: number
   kEff: number
+  reactivityPcm: number
+  openmcCeReactivityPcm: number
   openmcReferenceKEff: number
   openmcReferenceStdDevPcm: number
   differencePcm: number
@@ -130,7 +142,7 @@ export type MultigroupDiffusionMetadata = {
 }
 
 export type MultigroupDiffusionResponse = {
-  heatmapRCm: number[]
+  heatmapXCm: number[]
   heatmapZCm: number[]
   heatmapFlux: number[][]
   heatmapPower: number[][]

@@ -131,10 +131,12 @@ The current backend exposes:
 - `POST /api/multigroup-diffusion/recompute`
 
 The frontend Core page is the validated OpenMC-informed multigroup view. It
-uses the existing multigroup backend API, loads the persisted four-group
-solution immediately, and solves the current rod position again only on
-explicit recompute. Its export, factor, and cache locations can be overridden with
-`MULTIGROUP_MGXS_EXPORT_DIR`, `MULTIGROUP_SPH_FACTORS_PATH`, and
+uses the existing multigroup backend API, follows the
+`openmc/diffusion_concentric_reactor.ipynb` four-group diffusion setup
+(`groupwise_fvm`, 0.1/1/5/20 cm radial targets, 10 cm axial target), mirrors
+the cylindrical field into an x-z image, and applies the clean OpenMC CE
+power-shape correction only to the displayed fission power map. Its export and
+cache locations can be overridden with `MULTIGROUP_MGXS_EXPORT_DIR` and
 `MULTIGROUP_DIFFUSION_CACHE_DIR`.
 
 The frontend treats the backend as the **source of truth** for:
@@ -175,18 +177,20 @@ Derived operating points:
 
 The dashboard shows reactivity in **pcm**, while the kinetics solver uses **delta-k/k** internally:
 
-- `beta_eff = 0.00651`
-- `beta_eff = 651 pcm`
-
---> change to MGXS beta's!
+- `beta_eff = 0.00678910882978`
+- `beta_eff = 678.91 pcm`
 
 ## 3. Point-kinetics solver
 
 The transient uses:
 
-- **6 delayed neutron groups** --> from MGXS, explain MGXS workflow
-- `beta_eff = 0.00651`
-- neutron generation time: **5e-4 s**
+- **6 delayed neutron groups** aggregated from
+  `openmc/reference_data/concentric/group_sweep/group_4/outputs/mgxs_constants.json`
+- neutron generation time: **0.00417212833712 s**, from the export's prompt
+  generation-time tally
+- fuel, moderator-temperature, and moderator-density feedback from the OpenMC
+  reactivity-coefficient CSV when the Modelica FMU supplies effective feedback
+  values
 
 The engine evolves:
 
@@ -197,6 +201,11 @@ From that, it derives:
 
 - thermal power
 - total flux
+
+Thermal feedback is FMI-only. If the FMU is unavailable and the fallback
+thermal model is active, the backend reports zero thermal-feedback reactivity.
+On reset, the initial FMU effective state is captured as the zero-feedback
+reference so the point model still starts at the critical rod insertion.
 
 The integration step is **implicit**, which keeps the browser-driven local workflow stable for this stiff kinetics system.
 

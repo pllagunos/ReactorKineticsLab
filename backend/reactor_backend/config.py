@@ -7,6 +7,7 @@ from .calibration import (
     ESTIMATE2_R_FUEL_CM,
     ESTIMATE2_R_INNER_CM,
 )
+from .kinetics_reference import KINETICS_REFERENCE
 from .rod_worth import ROD_WORTH_TABLE
 
 
@@ -48,20 +49,19 @@ class SimulationTuningConfig:
     time_scale: float
 
 
-DELAYED_NEUTRON_GROUPS = (
-    DelayedNeutronGroup(beta=0.00025, decay_constant=0.0124),
-    DelayedNeutronGroup(beta=0.00138, decay_constant=0.0305),
-    DelayedNeutronGroup(beta=0.00122, decay_constant=0.111),
-    DelayedNeutronGroup(beta=0.00264, decay_constant=0.301),
-    DelayedNeutronGroup(beta=0.00075, decay_constant=1.14),
-    DelayedNeutronGroup(beta=0.00027, decay_constant=3.01),
+DELAYED_NEUTRON_GROUPS = tuple(
+    DelayedNeutronGroup(
+        beta=group.beta,
+        decay_constant=group.decay_constant,
+    )
+    for group in KINETICS_REFERENCE.delayed_groups
 )
 
 REACTOR_MODEL = ReactorModelConfig(
     # Scram at 1.3 × nominal power (Estimate 2 baseline: 20 MWth)
-    auto_scram_power_mw=26,
-    beta_effective=0.00651,
-    beta_effective_pcm=651,
+    auto_scram_power_mw=1000,
+    beta_effective=KINETICS_REFERENCE.beta_effective,
+    beta_effective_pcm=KINETICS_REFERENCE.beta_effective_pcm,
     # Estimate 2 geometry (2D-critical clean core, from theory/reactorModel.ipynb)
     core_geometry=CoreGeometryConfig(
         active_height_meters=ESTIMATE2_H_ACTIVE_CM / 100.0,
@@ -72,7 +72,7 @@ REACTOR_MODEL = ReactorModelConfig(
     critical_rod_insertion_percent=ROD_WORTH_TABLE.critical_insertion_percent,
     nominal_flux_neutrons_per_square_centimeter_second=ESTIMATE2_NOMINAL_FLUX_N_CM2_S,
     nominal_thermal_power_mw=ESTIMATE2_NOMINAL_POWER_MW,
-    neutron_generation_time_seconds=5e-4,
+    neutron_generation_time_seconds=KINETICS_REFERENCE.neutron_generation_time_seconds,
     scram_shutdown_pcm=450,
     total_control_rod_worth_pcm=ROD_WORTH_TABLE.full_insertion_worth_pcm,
 )

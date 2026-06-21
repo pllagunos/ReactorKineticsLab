@@ -164,7 +164,7 @@ export function OverviewPage() {
               className="slider-vertical"
               min="0"
               max="100"
-              step="0.5"
+              step="0.1"
               value={snapshot.rodInsertionPercent}
               onChange={(e) =>
                 setRodInsertionPercent(Number(e.currentTarget.value))
@@ -204,12 +204,11 @@ export function OverviewPage() {
         </div>
 
         <CoolingLoopDiagram thermal={thermal} snapshot={snapshot} />
-      </div>
 
-      {/* ── Trend charts ── */}
-      <div className="overview-trends-row">
-        <TrendChart title="Neutronics" series={neutronicsSeries} />
-        <TrendChart title="Thermal Hydraulics" series={thSeries} />
+        <div className="overview-trends-stack">
+          <TrendChart title="Neutronics" series={neutronicsSeries} />
+          <TrendChart title="Thermal Hydraulics" series={thSeries} />
+        </div>
       </div>
 
       {/* ── Info footer ── */}
