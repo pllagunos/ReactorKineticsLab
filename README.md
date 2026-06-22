@@ -6,7 +6,9 @@ The reactor is modeled with montecarlo OpenMC software.
 
 The current version models a simplified **heavy-water-moderated natural uranium fueled core** with one operator control: **control rod insertion**. The browser dashboard shows how **reactivity**, **total neutron flux**, **thermal power** and **coolant temperatures** evolve over time.
 
-## What the app does
+![](docs/frontend.png)
+
+## Features
 
 - lets you move a **single control rod bank** from fully withdrawn to fully inserted
 - computes the resulting **reactivity**
@@ -17,6 +19,7 @@ The current version models a simplified **heavy-water-moderated natural uranium 
   - thermal power
   - simulated time
   - neutron period estimate
+  - core diffusion solution with flux and power maps
 - supports:
   - pause / resume
   - reset to critical
@@ -63,128 +66,29 @@ Open `http://127.0.0.1:5173`.
 curl http://127.0.0.1:8000/api/health
 ```
 
-## Hybrid architecture
+## Architecture
 
-## Frontend
-
-The frontend is a **Bun-managed React + TypeScript** app.
-
-Its job is to:
-
-- render the dashboard
-- send user commands to the backend
-- poll the latest state from the backend
-- display the rolling history charts and core schematic
-
-Key frontend files:
-
-- `frontend/src/App.tsx`
-  - dashboard composition and control wiring
-- `frontend/src/hooks/useReactorSimulation.ts`
-  - API polling, command calls, and React state integration
-- `frontend/src/simulation/api.ts`
-  - frontend API client for the Python service
-- `frontend/src/components/`
-  - schematic, charts, and metric cards
-
-Vite proxies `/api` requests to the Python backend during development.
-
-## Backend
-
-The backend is a small **FastAPI** service in `backend/reactor_backend/`.
-
-Its job is to:
-
-- own the reactor engine state
-- advance the transient over elapsed wall time when the simulation is running
-- keep rolling history on the server side
-- expose the current snapshot and control endpoints to the frontend
-
-Key backend files:
-
-- `backend/reactor_backend/config.py`
-  - reactor constants and simulation tuning
-- `backend/reactor_backend/reactivity.py`
-  - rod-worth to reactivity mapping
-- `backend/reactor_backend/engine.py`
-  - point-kinetics engine
-- `backend/reactor_backend/service.py`
-  - stateful simulation service, history, and timing
-- `backend/reactor_backend/thermal_adapter.py`
-  - Modelica FMU lifecycle, inputs/outputs, compatibility checks, and fallback
-- `backend/reactor_backend/multigroup_service.py`
-  - cached four-group clean-core diffusion service
-- `backend/reactor_backend/multigroup_sph.py`
-  - CE-referenced SPH fitting, application, and qualification
-- `backend/reactor_backend/app.py`
-  - FastAPI routes
-
-The Modelica FMU coupling is documented in `docs/fmu_coupling.md`.
-The webapp system architecture diagram is documented in
-`docs/system_architecture.md`.
-
-## API shape (is this needed -> ne, maybe a webpage architecture MD file)
-
-The current backend exposes:
-
-- `GET /api/health`
-- `GET /api/simulation/state`
-- `POST /api/simulation/reset`
-- `POST /api/simulation/rod-insertion`
-- `POST /api/simulation/running`
-- `POST /api/simulation/scram`
-- `GET /api/multigroup-diffusion/state`
-- `POST /api/multigroup-diffusion/recompute`
-
-The frontend Core page is the validated OpenMC-informed multigroup view. It
-uses the existing multigroup backend API, follows the
-`openmc/diffusion_concentric_reactor.ipynb` four-group diffusion setup
-(`groupwise_fvm`, 0.1/1/5/20 cm radial targets, 10 cm axial target), mirrors
-the cylindrical field into an x-z image, and applies the clean OpenMC CE
-power-shape correction only to the displayed fission power map. Its export and
-cache locations can be overridden with `MULTIGROUP_MGXS_EXPORT_DIR` and
-`MULTIGROUP_DIFFUSION_CACHE_DIR`.
-
-The frontend treats the backend as the **source of truth** for:
-
-- current reactor snapshot
-- rolling history
-- running / paused state
-- reactor constants used for display
+See `docs/system_architecture.md`
 
 ## How the simulation works
 
 ## 1. Core model
 
-See `theory` for more details.
+See `docs/reactor_model` for more details.
 
-- Narrative: initial homogeneous core - the simplified **annular core** (Estimate 2 geometry from `theory/reactorModel.ipynb`); then an openmc `openmc` workflow where we first realize issues with the diffusion model and then generate better fidelity cores starting with a frm2 style involute core and ending with a concentric core.
-- initial problems where the uneconomical size of the core, unrealistic homogeneous core.
+- First there was an initial homogeneous core - the simplified **annular core** (Estimate 2 geometry from `theory/reactorModel.ipynb`); then an openmc `openmc` workflow where we first realize issues with the diffusion model and then generate better fidelity cores starting with a frm2 style involute core and ending with a concentric core `openmc/concentric_reactor.ipynb` like the MURR reactor.
 
 ## 2. Reactivity model
 
 The only operator input is **rod insertion percent**. --> add flow rate in primary and secondary later!.
 
-Rod position is converted into reactivity using a **2D-calibrated rod-worth table** derived from `theory/reactorModel.ipynb`: --> need new rod-wroth table for new concentric core.
+Rod position is converted into reactivity using a **rod-worth table** generated at `openmc/concentric_reactor_rodworth.py` and saved as reference data `openmc/reference_data/concentric/rod_scan` Backend interpolation is linear between table points.
+- Total reactivity is computed as `ρ_total(x) = ρ_base(clean) + Δρ_rod(x) + ρ_scram + ρ_feedback`.
 
-- The clean, unrodded core is slightly supercritical in the 2D solve: `k_eff ≈ 1.000395` (`ρ ≈ +39.4 pcm`).
-- The table stores **rod-only** `Δρ(x)` at 11 points (x = 0.0 to 1.0 in steps of 0.1) from a 2D r-z finite-difference one-group diffusion eigenvalue scan.
-- Backend interpolation is linear between table points.
-- Total reactivity is computed as `ρ_total(x) = ρ_base(clean) + Δρ_rod(x) + ρ_scram`.
-- The rod is modeled as a **combined control/shutdown bank** with effective parameters:
-  - equivalent radius `r_rod = 50 cm`
-  - effective absorber increment `ΔΣ_a,max = 0.25 cm⁻¹` (one-group homogenized value)
+The dashboard shows reactivity in **pcm**, while the kinetics solver uses **delta-k/k** that come from a multi-group-cross-section generation in openmc using the `openmc.mgxs` library. More information is under the docs reactor_model.
 
-Derived operating points:
-
-- critical insertion: **~32%**
-- full insertion total reactivity: **~−120 pcm** (without extra SCRAM penalty)
-- extra SCRAM shutdown margin (latched trip): **450 pcm**
-
-The dashboard shows reactivity in **pcm**, while the kinetics solver uses **delta-k/k** internally:
-
-- `beta_eff = 0.00678910882978`
-- `beta_eff = 678.91 pcm`
+- `beta_eff = 0.00678910882978 = 678.91 pcm`
+-  `prompt_time = 0.004172s`
 
 ## 3. Point-kinetics solver
 
@@ -205,13 +109,8 @@ The engine evolves:
 
 From that, it derives:
 
-- thermal power
+- thermal power using diffusion solver and correction power map, see `openmc/diffusion_concentric_reactor.ipynb`
 - total flux
-
-Thermal feedback is FMI-only. If the FMU is unavailable and the fallback
-thermal model is active, the backend reports zero thermal-feedback reactivity.
-On reset, the initial FMU effective state is captured as the zero-feedback
-reference so the point model still starts at the critical rod insertion.
 
 The integration step is **implicit**, which keeps the browser-driven local workflow stable for this stiff kinetics system.
 
@@ -232,26 +131,6 @@ The backend advances the model using:
 - simulation speed: **8x wall clock**
 - frontend poll interval: **100 ms**
 
-The backend, not the browser, is responsible for:
-
-- simulated elapsed time
-- history accumulation
-- pause / resume correctness
-- capping long wall-time gaps
-
-## 5. Safety behavior
-
-There are two shutdown paths:
-
-1. **Manual SCRAM** from the dashboard
-2. **Automatic SCRAM** if power exceeds **26 MWth** (1.3 × nominal)
-
-When SCRAM is latched:
-
-- the rod bank is forced to **100% inserted**
-- an extra shutdown reactivity penalty is applied
-- the slider remains disabled until reset
-
 ## What is simplified
 
 This is still an educational first slice. Intentional simplifications:
@@ -263,43 +142,11 @@ This is still an educational first slice. Intentional simplifications:
 
 ## Next steps
 
-Now that the physics layer is in Python, natural next steps are:
-
-- once PK model of core is ready, replace backend core with openmc concentric core
-- regenerate the four-group CE reference at <=15 pcm uncertainty and qualify
-  the implemented SPH workflow
-- see `theory/ThermalHydraulics.tex` adjust to new core size
-- adjust modelica model
 - FMU build handlded outside of python and frozen (not gitignored)? or handled by a script, like with bun run backend:install? this way simulator can run on macos (if doable)
-- future: krylov instead of gauss-seidel
+- Cleaning up the documentation
 
-### frontend
-- view should be based on laptop screen 16:10
-- no scrolling should be needed at 100% zoom to visualize controls and graphs
-- less cards explaining stuff that's in the README.
-- does transient diffusion solver make sense?
+## License
 
-# architecture documentation:
-- Decide documentation structure (latex file for reactor modeling, TH and MD files for software arch?)
+Software source code is licensed under the MIT License. See [LICENSE](/LICENSE).
 
-###
-for openmc scripts, explaining architecture and functionality of fuel_element.py, involutes.py, ploting.py and reactor_geometry.py. Specially how its object oriented nature and dataclasses interact between each other. But also how they implement what they do (with special emphasis in how the involute plates are generated as polygons from sin,cos curves and transformations). Include also how the frm2_nat.ipynb notebook uses them.
-
-###
-i.e for python thermal_adapter.py you mentioned (older arch perhaps)
-
-FMU build/export management
-In thermal_adapter.py:275, _ensure_fmu() decides whether to reuse an existing FMU or run omc to export a fresh one.
-In thermal_adapter.py:309, _build_export_script() generates the .mos script for OpenModelica.
-In thermal_adapter.py:323, _fmu_has_expected_flags() checks that the FMU was built with the expected solver flags.
-
-FMU runtime lifecycle
-In thermal_adapter.py:149, _ensure_instance() loads the FMU metadata, finds variable references, extracts the FMU zip, instantiates the co-simulation slave, enters initialization mode, pushes initial inputs, exits initialization, and reads initial outputs.
-In thermal_adapter.py:342, _set_inputs() writes totalPower and axialPowerFractions.
-In thermal_adapter.py:349, _read_outputs() reads T_inlet, T_outlet, massFlow, and dp_core.
-In thermal_adapter.py:141, close() terminates the FMU instance, frees it, and deletes the extracted working directory.
-
-Failure containment / fallback model
-In thermal_adapter.py:218, _activate_fallback() switches to a simple surrogate thermal model if FMU init or stepping fails.
-In thermal_adapter.py:246, _advance_fallback() advances that surrogate with a first-order temperature response.
-In thermal_adapter.py:382, _unavailable_snapshot() packages an error state for the API.
+Unless otherwise noted, documentation and images in this repository are provided under the same license as the part of the project they accompany.

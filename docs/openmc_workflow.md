@@ -1,0 +1,2 @@
+###
+for openmc scripts, explaining architecture and functionality of fuel_element.py, involutes.py, ploting.py and reactor_geometry.py. Specially how its object oriented nature and dataclasses interact between each other. But also how they implement what they do (with special emphasis in how the involute plates are generated as polygons from sin,cos curves and transformations). Include also how the frm2_nat.ipynb notebook uses them.

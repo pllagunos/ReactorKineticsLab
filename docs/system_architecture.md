@@ -4,6 +4,7 @@ This diagram shows the webapp runtime architecture and the offline reference
 data paths that feed it.
 
 ```mermaid
+%%{init: {"themeVariables": {"fontSize": "18px"}} }%%
 flowchart LR
   subgraph OpenMC["OpenMC reference workflows"]
     CE["Continuous-energy OpenMC runs"]
@@ -146,6 +147,25 @@ they do not change point-kinetics reactivity.
 
 See `docs/fmu_coupling.md` for the detailed FMU lifecycle.
 
+### check for correctness:
+i.e for python thermal_adapter.p
+
+FMU build/export management
+In thermal_adapter.py:275, _ensure_fmu() decides whether to reuse an existing FMU or run omc to export a fresh one.
+In thermal_adapter.py:309, _build_export_script() generates the .mos script for OpenModelica.
+In thermal_adapter.py:323, _fmu_has_expected_flags() checks that the FMU was built with the expected solver flags.
+
+FMU runtime lifecycle
+In thermal_adapter.py:149, _ensure_instance() loads the FMU metadata, finds variable references, extracts the FMU zip, instantiates the co-simulation slave, enters initialization mode, pushes initial inputs, exits initialization, and reads initial outputs.
+In thermal_adapter.py:342, _set_inputs() writes totalPower and axialPowerFractions.
+In thermal_adapter.py:349, _read_outputs() reads T_inlet, T_outlet, massFlow, and dp_core.
+In thermal_adapter.py:141, close() terminates the FMU instance, frees it, and deletes the extracted working directory.
+
+Failure containment / fallback model
+In thermal_adapter.py:218, _activate_fallback() switches to a simple surrogate thermal model if FMU init or stepping fails.
+In thermal_adapter.py:246, _advance_fallback() advances that surrogate with a first-order temperature response.
+In thermal_adapter.py:382, _unavailable_snapshot() packages an error state for the API.
+
 ## API Boundary
 
 The frontend treats the backend as the source of truth. The browser does not
@@ -159,3 +179,70 @@ Primary API groups:
 Legacy backend routes for old one-group core/transient visualizations may still
 exist internally, but they are not the frontend's canonical spatial neutronics
 view.
+
+## Frontend
+
+The frontend is a **Bun-managed React + TypeScript** app.
+
+Its job is to:
+
+- render the dashboard
+- send user commands to the backend
+- poll the latest state from the backend
+- display the rolling history charts and core schematic
+
+Key frontend files:
+
+- `frontend/src/App.tsx`
+  - dashboard composition and control wiring
+- `frontend/src/hooks/useReactorSimulation.ts`
+  - API polling, command calls, and React state integration
+- `frontend/src/simulation/api.ts`
+  - frontend API client for the Python service
+- `frontend/src/components/`
+  - schematic, charts, and metric cards
+
+Vite proxies `/api` requests to the Python backend during development.
+
+## Backend
+
+The backend is a small **FastAPI** service in `backend/reactor_backend/`.
+
+Its job is to:
+
+- own the reactor engine state
+- advance the transient over elapsed wall time when the simulation is running
+- keep rolling history on the server side
+- expose the current snapshot and control endpoints to the frontend
+
+Key backend files:
+
+- `backend/reactor_backend/config.py`
+  - reactor constants and simulation tuning
+- `backend/reactor_backend/reactivity.py`
+  - rod-worth to reactivity mapping
+- `backend/reactor_backend/engine.py`
+  - point-kinetics engine
+- `backend/reactor_backend/service.py`
+  - stateful simulation service, history, and timing
+- `backend/reactor_backend/thermal_adapter.py`
+  - Modelica FMU lifecycle, inputs/outputs, compatibility checks, and fallback
+- `backend/reactor_backend/multigroup_service.py`
+  - cached four-group clean-core diffusion service
+- `backend/reactor_backend/multigroup_sph.py`
+  - CE-referenced SPH fitting, application, and qualification
+- `backend/reactor_backend/app.py`
+  - FastAPI routes
+
+The Modelica FMU coupling is documented in `docs/fmu_coupling.md`.
+The webapp system architecture diagram is documented in
+`docs/system_architecture.md`.
+
+The frontend Core page is the validated OpenMC-informed multigroup view. It
+uses the existing multigroup backend API, follows the
+`openmc/diffusion_concentric_reactor.ipynb` four-group diffusion setup
+(`groupwise_fvm`, 0.1/1/5/20 cm radial targets, 10 cm axial target), mirrors
+the cylindrical field into an x-z image, and applies the clean OpenMC CE
+power-shape correction only to the displayed fission power map. Its export and
+cache locations can be overridden with `MULTIGROUP_MGXS_EXPORT_DIR` and
+`MULTIGROUP_DIFFUSION_CACHE_DIR`.
