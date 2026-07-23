@@ -53,18 +53,11 @@ This runs `uv sync` inside `backend/`, creates the backend virtual environment, 
 bun run dev
 ```
 
-That launches:
+That launches the UV-managed Python backend and the Vite frontend on  `http://127.0.0.1:5173`.
 
-- the UV-managed Python backend on `http://127.0.0.1:8000`
-- the Vite frontend on `http://127.0.0.1:5173`
+> Quick backend check:
+> `curl http://127.0.0.1:8000/api/health`
 
-Open `http://127.0.0.1:5173`.
-
-### Quick backend check
-
-```bash
-curl http://127.0.0.1:8000/api/health
-```
 
 ## Architecture
 
@@ -78,6 +71,8 @@ See `docs/reactor_model` for more details.
 
 - First there was an initial homogeneous core - the simplified **annular core** (Estimate 2 geometry from `theory/reactorModel.ipynb`); then an openmc `openmc` workflow where we first realize issues with the diffusion model and then generate better fidelity cores starting with a frm2 style involute core and ending with a concentric core `openmc/concentric_reactor.ipynb` like the MURR reactor.
 
+[coreModel picture from images]
+
 ## 2. Reactivity model
 
 The only operator input is **rod insertion percent**. --> add flow rate in primary and secondary later!.
@@ -87,17 +82,14 @@ Rod position is converted into reactivity using a **rod-worth table** generated 
 
 The dashboard shows reactivity in **pcm**, while the kinetics solver uses **delta-k/k** that come from a multi-group-cross-section generation in openmc using the `openmc.mgxs` library. More information is under the docs reactor_model.
 
-- `beta_eff = 0.00678910882978 = 678.91 pcm`
--  `prompt_time = 0.004172s`
+[reactivity picture]
 
 ## 3. Point-kinetics solver
 
 The transient uses:
 
 - **6 delayed neutron groups** aggregated from
-  `openmc/reference_data/concentric/group_sweep/group_4/outputs/mgxs_constants.json`
-- neutron generation time: **0.00417212833712 s**, from the export's prompt
-  generation-time tally
+  `openmc/reference_data/concentric/group_sweep/group_4/outputs/mgxs_constants.json` as well as neutron genertion time from the openmc export
 - fuel, moderator-temperature, and moderator-density feedback from the OpenMC
   reactivity-coefficient CSV when the Modelica FMU supplies effective feedback
   values
@@ -114,29 +106,27 @@ From that, it derives:
 
 The integration step is **implicit**, which keeps the browser-driven local workflow stable for this stiff kinetics system.
 
+For time stepping and history settings, see: '' [where was this?]
+
 ### Nominal scaling
 
 Displayed values are scaled from nominal operating conditions:
 
 - nominal thermal power: **20 MWth**
-- nominal flux: **1.5 × 10¹² n/cm²/s** (Estimate 2 annular-core peak, 2D solution)
+- nominal flux: **1.5 × 10¹² n/cm²/s** (Estimate 2 annular-core peak, 2D solution) [is this still what we use???]
 
-## 4. Time stepping and history
+## 4. Thermal-hydraulics solver
 
-The backend advances the model using:
+Small modelica explanation
 
-- integrator step: **0.02 s**
-- history sampling: **0.25 s**
-- chart history length: **240 points**
-- simulation speed: **8x wall clock**
-- frontend poll interval: **100 ms**
+[reactorModel] picture
+[modelica picture]
 
 ## What is simplified
 
 This is still an educational first slice. Intentional simplifications:
 
 - one effective rod bank instead of a full control system
-- no thermal-hydraulic feedback
 - no xenon, temperature coefficients, void coefficients, or burnup
 - flux and power are scaled from nominal values
 
