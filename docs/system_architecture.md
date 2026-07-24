@@ -18,7 +18,7 @@ flowchart LR
     MGXSJson["group_sweep/group_4/.../mgxs_constants.json"]
     RodWorthData["rod worth table"]
     ReactivityCoeffData["reactivity coefficient CSV"]
-    PowerShapeData["CE power-shape correction"]
+    PowerShapeData["CE power mesh in MGXS JSON"]
   end
 
   subgraph Frontend["Browser frontend - React + Vite"]
@@ -33,6 +33,7 @@ flowchart LR
     Engine["ReactorEngine<br/>point kinetics"]
     Reactivity["reactivity.py<br/>rod + thermal feedback"]
     ThermalAdapter["ThermalAdapter<br/>FMPy FMU lifecycle"]
+    AxialShape["core_service.py<br/>legacy one-group axial shape"]
     MultigroupService["MultigroupDiffusionService<br/>Core page solve/cache"]
     MGXSAdapter["openmc_mgxs_adapter.py<br/>MGXS -> diffusion input"]
   end
@@ -76,6 +77,8 @@ flowchart LR
   App --> MultigroupService
   Service --> Engine
   Service --> ThermalAdapter
+  Service --> AxialShape
+  AxialShape --> ThermalAdapter
   Engine --> Reactivity
   ThermalAdapter --> Engine
 
@@ -97,8 +100,10 @@ The Overview page uses `/api/simulation/*`.
 3. `ReactorEngine` advances the point-kinetics equations.
 4. `reactivity.py` combines OpenMC rod worth, SCRAM penalty, and thermal
    feedback.
-5. `ThermalAdapter` advances the Modelica FMU and returns a `ThermalSnapshot`.
-6. The frontend polls `/api/simulation/state` and renders HMI values and trend
+5. `core_service.py` supplies the current rod-aware eight-node axial power
+   fractions from the legacy one-group shape helper.
+6. `ThermalAdapter` advances the Modelica FMU and returns a `ThermalSnapshot`.
+7. The frontend polls `/api/simulation/state` and renders HMI values and trend
    charts from the returned snapshot and history.
 
 The Core page uses `/api/multigroup-diffusion/*`.
@@ -125,6 +130,8 @@ The currently used reference artifacts include:
 - CE power-shape correction data used by the multigroup Core visualization
 
 These artifacts are treated as immutable inputs during normal webapp operation.
+The CE-corrected four-group power map is not yet the FMU axial heat-source
+input; that remaining path still uses the legacy one-group shape helper.
 
 ## FMU Coupling Summary
 
@@ -147,24 +154,6 @@ they do not change point-kinetics reactivity.
 
 See `docs/fmu_coupling.md` for the detailed FMU lifecycle.
 
-### check for correctness:
-i.e for python thermal_adapter.p
-
-FMU build/export management
-In thermal_adapter.py:275, _ensure_fmu() decides whether to reuse an existing FMU or run omc to export a fresh one.
-In thermal_adapter.py:309, _build_export_script() generates the .mos script for OpenModelica.
-In thermal_adapter.py:323, _fmu_has_expected_flags() checks that the FMU was built with the expected solver flags.
-
-FMU runtime lifecycle
-In thermal_adapter.py:149, _ensure_instance() loads the FMU metadata, finds variable references, extracts the FMU zip, instantiates the co-simulation slave, enters initialization mode, pushes initial inputs, exits initialization, and reads initial outputs.
-In thermal_adapter.py:342, _set_inputs() writes totalPower and axialPowerFractions.
-In thermal_adapter.py:349, _read_outputs() reads T_inlet, T_outlet, massFlow, and dp_core.
-In thermal_adapter.py:141, close() terminates the FMU instance, frees it, and deletes the extracted working directory.
-
-Failure containment / fallback model
-In thermal_adapter.py:218, _activate_fallback() switches to a simple surrogate thermal model if FMU init or stepping fails.
-In thermal_adapter.py:246, _advance_fallback() advances that surrogate with a first-order temperature response.
-In thermal_adapter.py:382, _unavailable_snapshot() packages an error state for the API.
 
 ## API Boundary
 
@@ -243,6 +232,7 @@ uses the existing multigroup backend API, follows the
 `openmc/diffusion_concentric_reactor.ipynb` four-group diffusion setup
 (`groupwise_fvm`, 0.1/1/5/20 cm radial targets, 10 cm axial target), mirrors
 the cylindrical field into an x-z image, and applies the clean OpenMC CE
-power-shape correction only to the displayed fission power map. Its export and
+power-shape correction only to the displayed fission power map. Runtime SPH
+factors are not applied. Its export and
 cache locations can be overridden with `MULTIGROUP_MGXS_EXPORT_DIR` and
 `MULTIGROUP_DIFFUSION_CACHE_DIR`.

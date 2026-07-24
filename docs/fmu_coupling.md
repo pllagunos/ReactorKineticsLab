@@ -70,6 +70,12 @@ An existing FMU is reused only when all of these are true:
 - all required input/output variables are present
 - at least one `axialPowerFractions[i]` input is present
 
+These checks validate the FMI contract and build flags, but they do not
+currently verify that the FMU contains a binary for the host platform. The
+tracked FMU contains `binaries/linux64`; it cannot be instantiated directly on
+macOS. A non-Linux host must export a local FMU with OpenModelica after removing
+the Linux artifact, or the adapter will use its fallback model.
+
 If any check fails, the adapter deletes the stale FMU and runs an OpenModelica
 script equivalent to:
 
@@ -123,6 +129,12 @@ For each thermal batch, the service:
 
 `fmu_power_mw` is the time-averaged power over the thermal batch. The reported
 power is the latest point-kinetics power used for display.
+
+The axial fractions currently come from
+`backend/reactor_backend/core_service.py`, which runs the retired one-group
+diffusion shape helper. They do not yet come from the four-group CE-corrected
+Core-page power map. Replacing this remaining legacy dependency is a current
+coupling limitation.
 
 ## Reactivity Feedback
 
@@ -180,6 +192,7 @@ If the HMI shows `n/a` or the API reports `thermal.source` as `fallback`, check
 Common causes:
 
 - the FMU is older than `ResearchReactorThermalHydraulics.mo`
+- the FMU does not contain a binary for the current operating system
 - the FMU is missing required variables such as `T_fuelEff` or `rho_m_eff`
 - the FMU was built without the expected `s:cvode` FMI flag
 - OpenModelica failed to export a fresh FMU

@@ -4,14 +4,18 @@
 \usepackage{amsmath}
 \usepackage{amssymb}
 \usepackage{array}
+\usepackage{graphicx}
+\usepackage[hidelinks]{hyperref}
 \usepackage[T1]{fontenc}
 \usepackage[utf8]{inputenc}
 \usepackage{lmodern}
+\graphicspath{{../images/}}
+\setlength{\emergencystretch}{3em}
 
 \title{Thermal Hydraulics for the Concentric Reactor Model\\[0.4em]
 \large Modelica loop and fuel heat-structure note}
 \author{}
-\date{June 2026}
+\date{July 2026}
 
 \begin{document}
 
@@ -33,16 +37,22 @@ model intended to provide:
   \item a transient fuel heat capacity between fission power and coolant heat removal.
 \end{itemize}
 
-The key change from the earlier annular-core note is that the thermal
-model is now framed around the OpenMC concentric fuel element.  The
-hydraulic circuit remains a single effective primary channel, but the
-fuel heat storage and heat-transfer area are derived from the resolved
-concentric fuel-ring geometry.
+The model is an aggregated thermal surrogate for the current concentric
+reactor concept.  The hydraulic circuit is one effective primary channel and
+the fuel heat structure uses equivalent concentric rings.  It exchanges total
+power and an eight-node axial shape with the neutronics backend; it does not
+reproduce the OpenMC cell geometry one-to-one.
 
-\section{Concentric Reactor Inputs}
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.78\textwidth]{modelica.png}
+  \caption{Modelica primary-loop and core thermal-hydraulics model.}
+\end{figure}
 
-The first-pass thermal model uses the OpenMC concentric fuel-element
-defaults as its core geometry source of truth:
+\section{Modelica Fuel-Structure Inputs}
+
+The current parameters are read from
+\texttt{modelica/ResearchReactorThermalHydraulics.mo}:
 
 \begin{center}
 \begin{tabular}{lc}
@@ -51,11 +61,11 @@ Quantity & Value \\
 \hline
 Nominal thermal power $P$ & $20\ \mathrm{MW}$ \\
 Fuel ring count & $6$ \\
-Fuel meat thickness & $1.5\ \mathrm{cm}$ \\
-Coolant gap between rings & $4.5\ \mathrm{cm}$ \\
-Fuel-element inner radius & $20\ \mathrm{cm}$ \\
-Fuel-element outer radius & $60\ \mathrm{cm}$ \\
-Active fuel height & $350\ \mathrm{cm}$ \\
+Fuel meat thickness & $0.5\ \mathrm{cm}$ \\
+Coolant gap between rings & $7.0\ \mathrm{cm}$ \\
+Fuel-element inner radius & $4.5\ \mathrm{cm}$ \\
+Fuel-element outer radius & $50\ \mathrm{cm}$ \\
+Active fuel height & $150\ \mathrm{cm}$ \\
 Fuel density & $12.2\ \mathrm{g/cm^3}$ \\
 Primary coolant/moderator & D$_2$O represented by the current water approximation \\
 \hline
@@ -64,24 +74,26 @@ Primary coolant/moderator & D$_2$O represented by the current water approximatio
 
 From these values, the aggregate fuel-meat quantities are
 \[
-V_f \approx 0.7917\ \mathrm{m^3},
+V_f \approx 0.07705\ \mathrm{m^3},
 \qquad
-m_f \approx 9.66\times 10^3\ \mathrm{kg},
+m_f \approx 9.40\times 10^2\ \mathrm{kg},
 \qquad
-A_{ht} = \frac{V_f}{t_f/2} \approx 105.6\ \mathrm{m^2},
+A_{ht} = \frac{V_f}{t_f/2} \approx 30.82\ \mathrm{m^2},
 \]
-where $t_f=1.5\ \mathrm{cm}$ is the fuel meat thickness.  The implied
+where $t_f=0.5\ \mathrm{cm}$ is the fuel meat thickness.  The implied
 average fuel-meat power density at 20 MW is approximately
 \[
-q'''_f = \frac{P}{V_f} \approx 25.3\ \mathrm{MW/m^3}.
+q'''_f = \frac{P}{V_f} \approx 259.6\ \mathrm{MW/m^3}.
 \]
 
-The effective Modelica core pipe uses the OpenMC active height.  Its diameter
-is intentionally retained as a calibrated single-channel hydraulic diameter,
-not the $1.2\ \mathrm{m}$ fuel-envelope outer diameter.  The concentric
-OpenMC dimensions enter the fuel heat storage and heat-transfer area directly;
-pressure drop remains a coarse loop diagnostic rather than a resolved
-subchannel prediction.
+The effective Modelica core pipe uses the 1.5 m thermal active height and a
+calibrated 0.5 m single-channel hydraulic diameter.  These are thermal-model
+parameters, not dimensions imported from the published OpenMC artifact.  The
+current four-group neutronics reference has seven resolved fuel rings and a
+3.0 m active height.  Power and normalized axial fractions are coupled between
+the models, but a one-to-one region mapping has not yet been implemented.
+Pressure drop therefore remains a coarse loop diagnostic rather than a
+resolved subchannel prediction.
 
 \section{Operating Envelope}
 
@@ -339,7 +351,10 @@ T_{f,eff} = \sum_{j=1}^{N_z} f_j
   \left(\frac{1}{N_r}\sum_{r=1}^{N_r} T_{f,j,r}\right),
 \]
 where $f_j$ are the normalised axial power fractions supplied to the
-Modelica model.
+Modelica model.  The current Python service obtains these fractions from the
+legacy one-group diffusion helper
+\path{core_service.compute_axial_power_fractions_8()}, not from the
+four-group CE-corrected Core map.
 
 The moderator/coolant feedback temperature is the same axial weighting
 applied to the bulk coolant temperatures:
@@ -426,6 +441,8 @@ The current implementation deliberately excludes:
   \item hot-channel factors and safety-margin calculations,
   \item temperature-dependent fuel properties,
   \item D$_2$O-specific medium replacement in Modelica,
+  \item one-to-one geometry and material mapping to the OpenMC reference model,
+  \item four-group CE-corrected axial power input to the FMU,
   \item decay heat and shutdown cooling,
   \item active pool cooling and detailed reflector thermal hydraulics,
   \item pump coastdown and full pump head-curve dynamics.

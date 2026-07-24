@@ -6,18 +6,21 @@ The concentric diffusion model uses resolved OpenMC cell-wise multigroup
 constants. It does not homogenize the fuel rings into one core material and it
 does not solve higher-order transport equations.
 
-The production workflow has five distinct stages:
+The complete workflow has five distinct stages:
 
 1. OpenMC continuous-energy calculation and MGXS tallying.
 2. OpenMC multigroup transport validation.
 3. Conversion of the canonical MGXS export into diffusion regions and a
    boundary-fitted finite-volume mesh.
-4. CE-referenced SPH fitting on a fixed, qualified diffusion mesh.
-5. Group-wise diffusion solution and persistence of the factors, prepared
-   matrices, and clean-core result.
+4. Group-wise diffusion solution and persistence of prepared matrices and the
+   clean-core result.
+5. Optional offline CE-referenced SPH fitting on a fixed diffusion mesh.
 
-The first online model is four-group and clean-core only. Discontinuity
-factors, rodded MGXS, and rod-dependent SPH remain out of scope.
+The online model is four-group and rod-aware. The clean state uses the raw
+four-group diffusion solve and CE power-shape correction. Rodded states use an
+equivalent absorber and keep the clean CE correction fixed, so they are
+explicitly provisional. Runtime SPH, discontinuity factors, rodded MGXS, and
+rod-dependent SPH remain out of scope.
 
 ## Scattering Contract
 
@@ -228,7 +231,7 @@ source of nuclear data.
 
 ## Online Contract
 
-The backend exposes the four-group clean-core model at:
+The backend exposes the four-group rod-aware model at:
 
 ```text
 GET  /api/multigroup-diffusion/state
@@ -238,13 +241,19 @@ POST /api/multigroup-diffusion/recompute
 The frontend exposes this validated OpenMC-informed result as the Core page.
 The API names remain `multigroup-diffusion` to avoid backend contract churn.
 
-Startup loads the persisted clean solution and corrected CSR operators when a
-matching factor artifact exists. A fresh solve runs only on explicit
-recompute. Missing factors produce a clearly marked uncorrected, provisional
-result. The service reads the current rod insertion from the point-kinetics
-simulation state; reactivity itself remains in point kinetics.
+The service passes `sph_factors=None`, loads or builds the raw clean-core cache,
+and stores in-process rodded solves by insertion fraction. The clean response
+is qualified when its diffusion `k_eff` agrees with the associated CE reference
+within `max(10 pcm, 3 sigma)`. This is a clean-result service qualification, not
+an SPH qualification.
 
-## Qualification Criteria
+The service reads the current rod insertion from the point-kinetics state.
+Flux and power heatmaps are scaled against the clean-core peak so rod positions
+remain visually comparable. The returned diffusion reactivity is diagnostic;
+operator reactivity remains tied to the OpenMC CE rod-worth table in point
+kinetics.
+
+## Offline SPH Qualification Criteria
 
 A final factor set is qualified only when:
 
@@ -258,10 +267,11 @@ A final factor set is qualified only when:
 
 Corrected `k_eff`, reactivity, CE `k_eff` uncertainty and maximum pointwise
 power errors are still reported, but they are not SPH pass/fail gates. The
-calibrated diffusion model is intended for clean-core power and flux shape; rod
+offline SPH model is intended for clean-core power and flux shape; rod
 worth and reactivity studies remain assigned to OpenMC.
 
-# Results multigroup diffusion w/o SPH
+## Archived Group-Sweep Results Without SPH
+
 | Groups | MG OpenMC error vs CE | Diffusion error vs CE | Approx. diffusion bias vs MG |
 | -----: | --------------------: | --------------------: | ---------------------------: |
 |      1 |             +1908 pcm |             +1800 pcm |                     −108 pcm |
@@ -271,8 +281,15 @@ worth and reactivity studies remain assigned to OpenMC.
 |     16 |               +66 pcm |              −400 pcm |                     −466 pcm |
 
 These values are the uncorrected baseline. They are retained to show the
-group-condensation trend and are not SPH qualification results.
+group-condensation trend and are not the current Core-page clean benchmark or
+SPH qualification results.
 
+## Deferred Work
+
+- Generate true rodded MGXS and rod-dependent transport corrections.
+- Revisit SPH region selection and factor stability with a new high-statistics
+  CE publication.
+- Evaluate discontinuity factors after the clean SPH path is qualified.
 # Inspiration
 
 On the use of the SPH method in nodal diffusion analyses of SFR cores - 10.1016/j.anucene.2015.06.007

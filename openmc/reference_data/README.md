@@ -20,9 +20,12 @@ the group structure and replaces the complete published sweep atomically.
 
 The four-group publication is the default input for:
 
-- `theory/concentricModel.ipynb`
+- `openmc/diffusion_concentric_reactor.ipynb`
 - `backend/reactor_backend/multigroup_service.py`
+- `backend/reactor_backend/kinetics_reference.py`
 - `genfoam/prepare_concentric_case.py`
 
-These exports describe the clean resolved core. They do not replace the
-backend point-kinetics rod-worth calibration or its transient model constants.
+The publication describes the clean resolved core. Its MGXS, prompt generation
+time, and delayed-neutron data feed the current backend. Point-kinetics rod
+worth and thermal-feedback coefficients are published separately under
+`concentric/rod_scan/` and `concentric/reactivity_coefficients/`.

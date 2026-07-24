@@ -1,2 +1,0 @@
-- this folder should contain the physics models used throughout the notebook and how they are implemented (numerical methods).
-- the modeling of the reactor in successive stages should be refactored into theory/Modeling_latex
